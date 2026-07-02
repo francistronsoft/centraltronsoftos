@@ -55,6 +55,12 @@ CENTRAL_TRONSOFTOS_SETUP_CLOUDFLARED=yes \
 bash install.sh
 ```
 
+Se o terminal SSH nao aceitar colar o token, salve em um arquivo temporario e use:
+
+```bash
+CENTRAL_TRONSOFTOS_CLOUDFLARED_TOKEN_FILE=/root/cloudflare-token.txt bash install.sh
+```
+
 Guia detalhado com `systemd` e Nginx: `docs/deploy-debian.md`.
 
 No Debian, o instalador configura PostgreSQL por padrao e grava `DATABASE_URL` em `/etc/central-tronsoftos/central.env`. Sem `DATABASE_URL`, a Central usa JSON local apenas como fallback de desenvolvimento.

@@ -13,6 +13,7 @@ DOMAIN="${CENTRAL_TRONSOFTOS_DOMAIN:-central.tronsoft.app.br}"
 SETUP_NGINX="${CENTRAL_TRONSOFTOS_SETUP_NGINX:-ask}"
 SETUP_CLOUDFLARED="${CENTRAL_TRONSOFTOS_SETUP_CLOUDFLARED:-ask}"
 CLOUDFLARED_TOKEN="${CENTRAL_TRONSOFTOS_CLOUDFLARED_TOKEN:-}"
+CLOUDFLARED_TOKEN_FILE="${CENTRAL_TRONSOFTOS_CLOUDFLARED_TOKEN_FILE:-}"
 SETUP_POSTGRES="${CENTRAL_TRONSOFTOS_SETUP_POSTGRES:-ask}"
 POSTGRES_DB="${CENTRAL_TRONSOFTOS_POSTGRES_DB:-central_tronsoftos}"
 POSTGRES_USER="${CENTRAL_TRONSOFTOS_POSTGRES_USER:-central_tronsoftos}"
@@ -428,8 +429,14 @@ setup_cloudflared() {
   install_cloudflared
 
   local token="$CLOUDFLARED_TOKEN"
+  if [[ -z "$token" && -n "$CLOUDFLARED_TOKEN_FILE" ]]; then
+    [[ -f "$CLOUDFLARED_TOKEN_FILE" ]] || fail "Arquivo do token Cloudflare nao encontrado: $CLOUDFLARED_TOKEN_FILE"
+    token="$(tr -d '\r\n\t ' < "$CLOUDFLARED_TOKEN_FILE")"
+  fi
   if [[ -z "$token" ]]; then
-    token="$(ask_secret "Cole o token do Cloudflare Tunnel:")"
+    printf 'Cole o token do Cloudflare Tunnel e pressione Enter.\n' >&2
+    printf 'Dica: se o terminal nao aceitar colar, use CENTRAL_TRONSOFTOS_CLOUDFLARED_TOKEN_FILE.\n' >&2
+    token="$(ask_secret "Token:")"
   fi
   [[ -n "$token" ]] || fail "Token do Cloudflare Tunnel nao informado."
 

@@ -75,6 +75,22 @@ CENTRAL_TRONSOFTOS_ADMIN_EMAIL=admin@tronsoft.com.br \
 bash install.sh
 ```
 
+Se o SSH nao deixar colar o token no prompt, use arquivo temporario:
+
+```bash
+nano /root/cloudflare-token.txt
+chmod 600 /root/cloudflare-token.txt
+
+CENTRAL_TRONSOFTOS_SETUP_NGINX=no \
+CENTRAL_TRONSOFTOS_SETUP_POSTGRES=yes \
+CENTRAL_TRONSOFTOS_SETUP_CLOUDFLARED=yes \
+CENTRAL_TRONSOFTOS_CLOUDFLARED_TOKEN_FILE=/root/cloudflare-token.txt \
+CENTRAL_TRONSOFTOS_ADMIN_EMAIL=admin@tronsoft.com.br \
+bash install.sh
+
+rm -f /root/cloudflare-token.txt
+```
+
 Usando um PostgreSQL externo:
 
 ```bash
