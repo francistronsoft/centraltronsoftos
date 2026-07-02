@@ -135,9 +135,32 @@ function publicUser(user) {
 }
 
 function bootstrapUsers(db) {
-  if (db.users.length > 0) return false;
   const email = process.env.CENTRAL_ADMIN_EMAIL || "suporte@tronsoft.com.br";
   const password = process.env.CENTRAL_ADMIN_PASSWORD || "admin123";
+  const existing = db.users.find((user) => user.email.toLowerCase() === email.toLowerCase());
+  if (existing) {
+    let changed = false;
+    if (existing.role !== tronsoftRole) {
+      existing.role = tronsoftRole;
+      changed = true;
+    }
+    if (existing.resellerId !== null) {
+      existing.resellerId = null;
+      changed = true;
+    }
+    if (existing.status !== "active") {
+      existing.status = "active";
+      changed = true;
+    }
+    if (!verifyPassword(password, existing.passwordHash)) {
+      existing.passwordHash = hashPassword(password);
+      changed = true;
+    }
+    if (changed) {
+      existing.updatedAt = nowIso();
+    }
+    return changed;
+  }
   db.users.push({
     id: randomUUID(),
     name: "Administrador TronSoft",
