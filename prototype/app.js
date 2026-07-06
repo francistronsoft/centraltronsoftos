@@ -14,6 +14,8 @@ let currentResellers = [];
 let currentOAuthSummary = null;
 let activeView = "dashboard";
 let monitorFilter = "all";
+let clientPage = 1;
+const clientsPageSize = 10;
 
 const viewTitles = {
   dashboard: "Monitoramento geral",
@@ -71,6 +73,14 @@ function numberFromPaths(source, paths) {
 
 function latestOpenAlertForClient(clientId) {
   return currentAlerts.find((alert) => alert.clientId === clientId && alert.status !== "resolved");
+}
+
+function databaseVersion(installation) {
+  return installation?.database?.versaoBanco
+    || installation?.database?.versao_banco
+    || installation?.database?.schemaVersion
+    || installation?.database?.version
+    || "-";
 }
 
 const ufCoordinates = {
@@ -313,13 +323,7 @@ async function loadCentralData() {
       state: normalizeState(client.state),
       environment: installation.name,
       version: installation.tronsoftos?.version || "-",
-      database: [
-        installation.database?.engine,
-        installation.database?.version,
-        installation.database?.schemaVersion
-      ]
-        .filter(Boolean)
-        .join(" / ") || "-",
+      database: databaseVersion(installation),
       status: installation.status,
       lastSeen: installation.lastSeenAt ? new Date(installation.lastSeenAt).toLocaleString("pt-BR") : "-",
       lastSeenAt: installation.lastSeenAt || null,
@@ -355,6 +359,10 @@ function diskPercent(installation) {
   return numberFromPaths(installation, [
     "backups.disk.percentUsed",
     "backups.disk.usedPercent",
+    "metrics.systemMetrics.diskUsedPercent",
+    "metrics.systemMetrics.latest.diskUsedPercent",
+    "metrics.systemMetrics.host.diskUsedPercent",
+    "metrics.systemMetrics.disk.percentUsed",
     "metrics.diskUsedPercent",
     "metrics.host.diskUsedPercent",
     "host.diskUsedPercent",
@@ -396,8 +404,11 @@ function renderClients(filter = "") {
     const searchable = `${client.name} ${client.reseller} ${client.environment} ${client.database || ""}`.toLowerCase();
     return searchable.includes(normalizedFilter);
   });
+  const totalPages = Math.max(1, Math.ceil(visibleClients.length / clientsPageSize));
+  clientPage = Math.min(clientPage, totalPages);
+  const pageClients = visibleClients.slice((clientPage - 1) * clientsPageSize, clientPage * clientsPageSize);
 
-  table.innerHTML = visibleClients
+  table.innerHTML = pageClients
     .map((client) => {
       const location = [client.city, client.state].filter(Boolean).join(" / ") || "-";
       return `
@@ -416,6 +427,29 @@ function renderClients(filter = "") {
         <td colspan="6" class="empty-cell">Nenhum cliente encontrado neste escopo.</td>
       </tr>
     `;
+  renderClientPagination(visibleClients.length, totalPages);
+}
+
+function renderClientPagination(total, totalPages) {
+  const pagination = document.querySelector("#client-pagination");
+  if (!pagination) return;
+  if (total <= clientsPageSize) {
+    pagination.innerHTML = "";
+    return;
+  }
+  const start = (clientPage - 1) * clientsPageSize + 1;
+  const end = Math.min(total, clientPage * clientsPageSize);
+  pagination.innerHTML = `
+    <span>${start}-${end} de ${total}</span>
+    <button type="button" data-client-page="prev" ${clientPage <= 1 ? "disabled" : ""}>Anterior</button>
+    <button type="button" data-client-page="next" ${clientPage >= totalPages ? "disabled" : ""}>Proxima</button>
+  `;
+  pagination.querySelectorAll("[data-client-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clientPage += button.dataset.clientPage === "next" ? 1 : -1;
+      renderClients(document.querySelector("#client-filter").value);
+    });
+  });
 }
 
 function renderDashboardClients() {
@@ -426,7 +460,7 @@ function renderDashboardClients() {
     if (monitorFilter === "warning") return status === "warning";
     if (monitorFilter === "offline") return status === "offline";
     return true;
-  });
+  }).slice(0, 5);
 
   list.innerHTML = visibleClients
     .map((client) => {
@@ -451,7 +485,6 @@ function renderDashboardClients() {
             ${disk === null ? `<small>sem dados</small>` : ""}
           </div>
           <div><span class="backup-pill ${escapeHtml(client.backup.tone)}">${escapeHtml(client.backup.label)}</span></div>
-          <div><button class="access-button" type="button" title="Acesso operacional ainda sera integrado">Acessar</button></div>
         </article>
       `;
     })
@@ -473,7 +506,11 @@ function renderAlerts() {
   const filter = document.querySelector("#alert-filter")?.value || "";
   if (!list) return;
   const visibleAlerts = currentAlerts
-    .filter((alert) => !filter || alert.severity === filter)
+    .filter((alert) => {
+      if (filter === "resolved") return alert.status === "resolved";
+      if (alert.status === "resolved") return false;
+      return !filter || alert.severity === filter;
+    })
     .slice()
     .sort((a, b) => new Date(b.openedAt || 0) - new Date(a.openedAt || 0));
 
@@ -481,7 +518,7 @@ function renderAlerts() {
     .map((alert) => {
       const context = alertContext(alert);
       return `
-        <article class="alert-row ${escapeHtml(alert.severity)}">
+        <article class="alert-row ${escapeHtml(alert.severity)} ${alert.status === "resolved" ? "resolved" : ""}">
           <div>
             <span class="alert-severity ${escapeHtml(alert.severity)}">${escapeHtml(severityLabels[alert.severity] || alert.severity)}</span>
             <strong>${escapeHtml(alert.title || alert.code || "Alerta")}</strong>
@@ -492,7 +529,7 @@ function renderAlerts() {
             <small>${escapeHtml(context.resellerName)} / ${escapeHtml(context.environment)}</small>
           </div>
           <div>
-            <span>${escapeHtml(alert.status || "open")}</span>
+            <span>${escapeHtml(alert.status === "resolved" ? "Resolvido" : "Aberto")}</span>
             <small>${escapeHtml(formatRelativeTime(alert.openedAt))}</small>
           </div>
         </article>
@@ -724,6 +761,7 @@ document.querySelectorAll("[data-monitor-filter]").forEach((button) => {
 document.querySelector("#reseller-filter").addEventListener("change", loadCentralData);
 document.querySelector("#alert-filter").addEventListener("change", renderAlerts);
 document.querySelector("#client-filter").addEventListener("input", (event) => {
+  clientPage = 1;
   renderClients(event.target.value);
 });
 document.querySelector("#client-form").addEventListener("submit", createClient);

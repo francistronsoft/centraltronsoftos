@@ -287,7 +287,7 @@ p {
 .monitor-head,
 .monitor-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.45fr) minmax(130px, 0.9fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) 96px;
+  grid-template-columns: minmax(210px, 1.45fr) minmax(130px, 0.9fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr);
   gap: 18px;
   align-items: center;
 }
@@ -374,8 +374,7 @@ p {
   background: var(--danger);
 }
 
-.backup-pill,
-.access-button {
+.backup-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -401,13 +400,6 @@ p {
   background: var(--surface-strong);
 }
 
-.access-button {
-  border: 0;
-  color: var(--text);
-  background: #e1e8f0;
-  cursor: pointer;
-}
-
 .empty-monitor {
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -427,6 +419,38 @@ p {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 52px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.pagination span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pagination button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--text);
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .view > .panel + .panel {
@@ -749,6 +773,12 @@ tr:last-child td {
 
 .alert-row.info {
   border-left-color: var(--brand);
+}
+
+.alert-row.resolved {
+  border-left-color: var(--muted);
+  background: var(--surface-strong);
+  opacity: 0.82;
 }
 
 .alert-row strong,

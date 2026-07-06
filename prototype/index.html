@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central TronSoftOS</title>
-    <link rel="stylesheet" href="styles.css?v=20260706-dashboard-alerts">
+    <link rel="stylesheet" href="styles.css?v=20260706-dashboard-alerts-v2">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -98,7 +98,6 @@
                 <span>Status</span>
                 <span>Disco</span>
                 <span>Backup</span>
-                <span>Acesso</span>
               </div>
               <div id="dashboard-clients-list" class="monitor-list"></div>
             </div>
@@ -194,6 +193,7 @@
                 <tbody id="clients-table"></tbody>
               </table>
             </div>
+            <div id="client-pagination" class="pagination"></div>
           </div>
         </section>
 
@@ -220,6 +220,7 @@
                 <option value="critical">Criticos</option>
                 <option value="warning">Atencao</option>
                 <option value="info">Informativos</option>
+                <option value="resolved">Resolvidos</option>
               </select>
             </div>
             <div id="alerts-list" class="alerts-list"></div>
@@ -261,6 +262,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=20260706-dashboard-alerts"></script>
+    <script src="app.js?v=20260706-dashboard-alerts-v2"></script>
   </body>
 </html>

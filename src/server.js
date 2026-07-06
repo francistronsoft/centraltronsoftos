@@ -385,6 +385,7 @@ function upsertInstallation(db, client, payload) {
       engine: payload.database?.engine || "",
       version: payload.database?.version || "",
       schemaVersion: payload.database?.schemaVersion || "",
+      versaoBanco: payload.database?.versaoBanco || payload.database?.versao_banco || payload.database?.schemaVersion || "",
       sizeMb: payload.database?.sizeMb ?? null
     },
     host: {
@@ -430,6 +431,7 @@ function upsertInstallationForClient(db, client, payload) {
       engine: payload.database?.engine || "",
       version: payload.database?.version || "",
       schemaVersion: payload.database?.schemaVersion || "",
+      versaoBanco: payload.database?.versaoBanco || payload.database?.versao_banco || payload.database?.schemaVersion || "",
       sizeMb: payload.database?.sizeMb ?? null
     },
     host: {
@@ -934,12 +936,27 @@ async function handleHeartbeat(request, response) {
   installation.status = normalizeStatus(payload.status || "online");
   installation.tronsoftos = { ...installation.tronsoftos, ...payload.tronsoftos };
   installation.database = { ...installation.database, ...payload.database };
+  installation.database.versaoBanco = payload.database?.versaoBanco
+    || payload.database?.versao_banco
+    || payload.database?.schemaVersion
+    || installation.database.versaoBanco
+    || "";
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.backups = { ...(installation.backups || {}), ...(payload.backups || {}) };
   installation.metrics = { ...(installation.metrics || {}), ...(payload.metrics || payload.systemMetrics || {}) };
   installation.lastSeenAt = nowIso();
   installation.updatedAt = nowIso();
+
+  if (Array.isArray(payload.alerts)) {
+    const activeCodes = new Set(payload.alerts.map((alert) => alert.code).filter(Boolean));
+    db.alerts.forEach((alert) => {
+      if (alert.installationId !== installation.installationId || alert.status !== "open") return;
+      if (alert.code && activeCodes.has(alert.code)) return;
+      alert.status = "resolved";
+      alert.resolvedAt = nowIso();
+    });
+  }
 
   addEvent(db, "heartbeat", installation, payload);
   await writeDb(db);
