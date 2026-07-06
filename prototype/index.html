@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central TronSoftOS</title>
-    <link rel="stylesheet" href="styles.css?v=20260706-dashboard-alerts-v2">
+    <link rel="stylesheet" href="styles.css?v=20260706-maintenance-update">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -250,11 +250,7 @@
             <div class="maintenance-box">
               <button id="maintenance-update-button" class="primary-button" type="button">Atualizar pelo Git</button>
               <div id="maintenance-result" class="maintenance-result">
-                Para habilitar atualizacao automatica por botao, e necessario autorizar a Central a executar um script privilegiado controlado no Debian.
-              </div>
-              <div class="oauth-contract">
-                <strong>Comando manual atual</strong>
-                <code>cd /root/centraltronsoftos && git pull && install -m 0644 prototype/index.html /opt/central-tronsoftos/app/prototype/index.html && install -m 0644 prototype/app.js /opt/central-tronsoftos/app/prototype/app.js && install -m 0644 prototype/styles.css /opt/central-tronsoftos/app/prototype/styles.css && systemctl restart central-tronsoftos</code>
+                Pronto para atualizar a Central a partir do repositorio Git.
               </div>
             </div>
           </div>
@@ -262,6 +258,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=20260706-dashboard-alerts-v2"></script>
+    <script src="app.js?v=20260706-maintenance-update"></script>
   </body>
 </html>

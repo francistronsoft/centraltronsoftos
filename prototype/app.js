@@ -15,6 +15,8 @@ let currentOAuthSummary = null;
 let activeView = "dashboard";
 let monitorFilter = "all";
 let clientPage = 1;
+let maintenanceJobId = null;
+let maintenancePollTimer = null;
 const clientsPageSize = 10;
 
 const viewTitles = {
@@ -703,9 +705,58 @@ async function createClient(event) {
   }
 }
 
-function requestMaintenanceUpdate() {
+function renderMaintenanceJob(job) {
   const result = document.querySelector("#maintenance-result");
-  result.textContent = "Atualizacao automatica por botao ainda precisa de autorizacao explicita para executar script privilegiado no Debian.";
+  const button = document.querySelector("#maintenance-update-button");
+  const output = [job.stdout, job.stderr].filter(Boolean).join("\n").trim();
+  button.disabled = job.status === "running";
+  result.className = `maintenance-result ${escapeHtml(job.status)}`;
+  result.innerHTML = `
+    <div class="maintenance-status">
+      <strong>${job.status === "running" ? "Executando atualizacao" : job.status === "success" ? "Atualizacao concluida" : "Atualizacao falhou"}</strong>
+      <span>${job.finishedAt ? new Date(job.finishedAt).toLocaleString("pt-BR") : "Aguardando conclusao..."}</span>
+    </div>
+    ${job.error ? `<p>${escapeHtml(job.error)}</p>` : ""}
+    <pre>${escapeHtml(output || "Aguardando saida do comando...")}</pre>
+  `;
+}
+
+async function pollMaintenanceJob() {
+  if (!maintenanceJobId) return;
+  try {
+    const job = await api(`/api/maintenance/jobs/${maintenanceJobId}`);
+    renderMaintenanceJob(job);
+    if (job.status === "running") {
+      maintenancePollTimer = setTimeout(pollMaintenanceJob, 2000);
+      return;
+    }
+    maintenanceJobId = null;
+  } catch (error) {
+    const result = document.querySelector("#maintenance-result");
+    result.className = "maintenance-result failed";
+    result.textContent = error.message || "Nao foi possivel consultar a atualizacao.";
+  }
+}
+
+async function requestMaintenanceUpdate() {
+  const result = document.querySelector("#maintenance-result");
+  const button = document.querySelector("#maintenance-update-button");
+  if (!confirm("Atualizar a Central pelo Git agora? O servico pode reiniciar ao concluir.")) return;
+  button.disabled = true;
+  result.className = "maintenance-result running";
+  result.innerHTML = "<strong>Iniciando atualizacao...</strong>";
+  if (maintenancePollTimer) clearTimeout(maintenancePollTimer);
+
+  try {
+    const payload = await api("/api/maintenance/update", { method: "POST" });
+    maintenanceJobId = payload.job.id;
+    renderMaintenanceJob(payload.job);
+    maintenancePollTimer = setTimeout(pollMaintenanceJob, 1500);
+  } catch (error) {
+    button.disabled = false;
+    result.className = "maintenance-result failed";
+    result.textContent = error.message || "Nao foi possivel iniciar a atualizacao.";
+  }
 }
 
 async function createReseller(event) {

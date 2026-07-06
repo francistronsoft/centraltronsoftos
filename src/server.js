@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
+import { spawn } from "node:child_process";
 import { extname, join, normalize, resolve } from "node:path";
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,10 @@ const sessionMaxAgeSeconds = 12 * 60 * 60;
 const tronsoftRole = "tronsoft_admin";
 const resellerRole = "reseller_user";
 const googleDriveScope = "https://www.googleapis.com/auth/drive.file";
+const updateCommand = process.env.CENTRAL_UPDATE_COMMAND || "/usr/local/sbin/central-tronsoftos-update";
+const updateTimeoutMs = Number(process.env.CENTRAL_UPDATE_TIMEOUT_MS || 15 * 60 * 1000);
+const maxJobLogLength = 80_000;
+const maintenanceJobs = new Map();
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -24,6 +29,86 @@ const contentTypes = {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function appendJobLog(job, stream, chunk) {
+  job[stream] += chunk.toString();
+  if (job[stream].length > maxJobLogLength) {
+    job[stream] = job[stream].slice(job[stream].length - maxJobLogLength);
+  }
+}
+
+function publicMaintenanceJob(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    exitCode: job.exitCode,
+    error: job.error,
+    stdout: job.stdout,
+    stderr: job.stderr
+  };
+}
+
+function startMaintenanceUpdateJob() {
+  const runningJob = [...maintenanceJobs.values()].reverse().find((job) => job.status === "running");
+  if (runningJob) return publicMaintenanceJob(runningJob);
+
+  const id = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const useSudo = typeof process.getuid === "function" && process.getuid() !== 0;
+  const command = useSudo ? "sudo" : updateCommand;
+  const args = useSudo ? [updateCommand] : [];
+  const job = {
+    id,
+    status: "running",
+    startedAt: nowIso(),
+    finishedAt: null,
+    exitCode: null,
+    error: null,
+    stdout: "",
+    stderr: ""
+  };
+  maintenanceJobs.set(id, job);
+  appendJobLog(job, "stdout", `$ ${command} ${args.join(" ")}\n`);
+
+  const child = spawn(command, args, {
+    cwd: rootDir,
+    env: process.env,
+    windowsHide: true
+  });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    job.status = "failed";
+    job.error = `tempo limite excedido apos ${Math.round(updateTimeoutMs / 60000)} minuto(s)`;
+    job.finishedAt = nowIso();
+    appendJobLog(job, "stderr", `\n[central] ${job.error}; encerrando atualizacao.\n`);
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, 5000).unref?.();
+  }, Math.max(updateTimeoutMs, 60_000));
+  timer.unref?.();
+
+  child.stdout.on("data", (chunk) => appendJobLog(job, "stdout", chunk));
+  child.stderr.on("data", (chunk) => appendJobLog(job, "stderr", chunk));
+  child.on("error", (error) => {
+    clearTimeout(timer);
+    job.status = "failed";
+    job.error = error.message;
+    job.finishedAt = nowIso();
+  });
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    job.exitCode = code;
+    if (!timedOut) {
+      job.status = code === 0 ? "success" : "failed";
+      job.finishedAt = nowIso();
+    }
+  });
+
+  return publicMaintenanceJob(job);
 }
 
 function normalizeStatus(status) {
@@ -1137,6 +1222,24 @@ async function handleApi(request, response, pathname) {
           updatedAt: credential.updatedAt
         }))
     });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/maintenance/update") {
+    requireTronsoft(user);
+    sendJson(response, 202, {
+      ok: true,
+      job: startMaintenanceUpdateJob()
+    });
+    return;
+  }
+
+  const maintenanceJobMatch = pathname.match(/^\/api\/maintenance\/jobs\/([^/]+)$/);
+  if (request.method === "GET" && maintenanceJobMatch) {
+    requireTronsoft(user);
+    const job = maintenanceJobs.get(maintenanceJobMatch[1]);
+    if (!job) throw httpError(404, "Execucao de manutencao nao encontrada.");
+    sendJson(response, 200, publicMaintenanceJob(job));
     return;
   }
 
