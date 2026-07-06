@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central TronSoftOS</title>
-    <link rel="stylesheet" href="styles.css?v=20260702-menu">
+    <link rel="stylesheet" href="styles.css?v=20260706-maintenance">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -41,6 +41,7 @@
           <button class="nav-item" type="button" data-view-target="installations">Ambientes</button>
           <button class="nav-item" type="button" data-view-target="alerts">Alertas</button>
           <button class="nav-item" type="button" data-view-target="oauth">0auth</button>
+          <button class="nav-item" type="button" data-view-target="maintenance">Manutencao</button>
         </nav>
       </aside>
 
@@ -114,7 +115,9 @@
             </div>
             <form id="reseller-form" class="reseller-form">
               <input name="name" type="text" placeholder="Revenda" required>
-              <input name="document" type="text" placeholder="Documento">
+              <input name="document" type="text" placeholder="CNPJ da revenda" required>
+              <input name="accessEmail" type="email" placeholder="Email de acesso da revenda" required>
+              <input name="password" type="text" placeholder="Senha inicial ou deixe em branco">
               <button class="primary-button" type="submit">Salvar revenda</button>
             </form>
             <div id="reseller-result" class="pairing-result" hidden></div>
@@ -193,10 +196,32 @@
 
         <section class="view" data-view="oauth" hidden>
           <div class="panel">
-            <div class="panel-header compact">
+            <div class="panel-header">
               <div>
-                <h2>0auth</h2>
-                <p>Worker e rotinas do 0auth ficarao nesta area.</p>
+                <h2>0auth Google Drive</h2>
+                <p>Autorizacao centralizada para backups do banco de dados no Google Drive.</p>
+              </div>
+            </div>
+            <div id="oauth-summary" class="oauth-summary"></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="maintenance" hidden>
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Atualizacao da Central</h2>
+                <p>Atualize a instalacao do Debian a partir do repositorio Git.</p>
+              </div>
+            </div>
+            <div class="maintenance-box">
+              <button id="maintenance-update-button" class="primary-button" type="button">Atualizar pelo Git</button>
+              <div id="maintenance-result" class="maintenance-result">
+                Para habilitar atualizacao automatica por botao, e necessario autorizar a Central a executar um script privilegiado controlado no Debian.
+              </div>
+              <div class="oauth-contract">
+                <strong>Comando manual atual</strong>
+                <code>cd /root/centraltronsoftos && git pull && install -m 0644 prototype/index.html /opt/central-tronsoftos/app/prototype/index.html && install -m 0644 prototype/app.js /opt/central-tronsoftos/app/prototype/app.js && install -m 0644 prototype/styles.css /opt/central-tronsoftos/app/prototype/styles.css && systemctl restart central-tronsoftos</code>
               </div>
             </div>
           </div>
@@ -204,6 +229,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=20260702-menu"></script>
+    <script src="app.js?v=20260706-maintenance"></script>
   </body>
 </html>

@@ -9,6 +9,7 @@ let currentUser = null;
 let currentClients = [];
 let currentAuthEvents = [];
 let currentResellers = [];
+let currentOAuthSummary = null;
 let activeView = "dashboard";
 
 const viewTitles = {
@@ -17,7 +18,15 @@ const viewTitles = {
   clients: "Clientes",
   installations: "Ambientes",
   alerts: "Alertas",
-  oauth: "0auth"
+  oauth: "0auth",
+  maintenance: "Manutencao"
+};
+
+const directTronsoftOption = {
+  id: "__tronsoft_direct",
+  name: "TronSoft",
+  document: "TRONSOFT-DIRETO",
+  directTronsoft: true
 };
 
 const ufCoordinates = {
@@ -178,7 +187,13 @@ async function configureScopeControls() {
   filter.innerHTML = `<option value="">Todas as revendas</option>${currentResellers
     .map((reseller) => `<option value="${reseller.id}">${escapeHtml(reseller.name)}</option>`)
     .join("")}`;
-  clientResellerSelect.innerHTML = currentResellers
+  const clientResellerOptions = [
+    directTronsoftOption,
+    ...currentResellers.filter((reseller) => {
+      return reseller.document !== directTronsoftOption.document && reseller.name.toLowerCase() !== "tronsoft";
+    })
+  ];
+  clientResellerSelect.innerHTML = clientResellerOptions
     .map((reseller) => `<option value="${reseller.id}">${escapeHtml(reseller.name)}</option>`)
     .join("");
 
@@ -202,12 +217,14 @@ async function configureScopeControls() {
 }
 
 async function loadCentralData() {
-  const [dashboard, registeredClients, installations, alerts] = await Promise.all([
+  const [dashboard, registeredClients, installations, alerts, oauthSummary] = await Promise.all([
     api(`/api/dashboard${querySuffix()}`),
     api(`/api/clients${querySuffix()}`),
     api(`/api/installations${querySuffix()}`),
-    api(`/api/alerts${querySuffix()}`)
+    api(`/api/alerts${querySuffix()}`),
+    api(`/api/oauth/google/summary${querySuffix()}`)
   ]);
+  currentOAuthSummary = oauthSummary;
 
   const installationsByClient = new Map();
   installations.forEach((installation) => {
@@ -265,6 +282,7 @@ async function loadCentralData() {
   renderClients(document.querySelector("#client-filter").value);
   renderGeoMap();
   renderAuthEvents();
+  renderOAuthSummary();
 }
 
 function renderMetrics(dashboard) {
@@ -312,7 +330,8 @@ function renderResellers() {
       (reseller) => `
         <article class="compact-item">
           <strong>${escapeHtml(reseller.name)}</strong>
-          <span>${escapeHtml(reseller.document || "Sem documento")}</span>
+          <span>CNPJ: ${escapeHtml(reseller.document || "Sem CNPJ")}</span>
+          <span>Acesso: ${escapeHtml(reseller.accessEmail || "Sem email")}</span>
         </article>
       `
     )
@@ -357,6 +376,45 @@ function renderGeoMap() {
     .join("") || `<p class="empty-note">Cadastre clientes com cidade e UF para popular o mapa.</p>`;
 }
 
+function renderOAuthSummary() {
+  const container = document.querySelector("#oauth-summary");
+  if (!container || !currentOAuthSummary) return;
+
+  const accounts = currentOAuthSummary.accounts || [];
+  container.innerHTML = `
+    <div class="oauth-grid">
+      <article class="metric">
+        <span>Google configurado</span>
+        <strong>${currentOAuthSummary.configured ? "Sim" : "Nao"}</strong>
+      </article>
+      <article class="metric">
+        <span>Ambientes</span>
+        <strong>${currentOAuthSummary.installations}</strong>
+      </article>
+      <article class="metric">
+        <span>Conectados</span>
+        <strong>${currentOAuthSummary.connected}</strong>
+      </article>
+    </div>
+    <div class="oauth-contract">
+      <strong>Endpoints do TronSoftOS</strong>
+      <code>GET /api/tronsoftos/oauth/google/status</code>
+      <code>POST /api/tronsoftos/oauth/google/start</code>
+      <code>POST /api/tronsoftos/oauth/google/token</code>
+      <span>Enviar sempre o header <b>x-installation-token</b> recebido no pareamento.</span>
+      <span>Redirect URI Google: ${escapeHtml(currentOAuthSummary.redirectUri)}</span>
+    </div>
+    <div class="compact-list oauth-accounts">
+      ${accounts.map((account) => `
+        <article class="compact-item">
+          <strong>${escapeHtml(account.accountEmail || "Conta Google")}</strong>
+          <span>${escapeHtml(account.installationId)}</span>
+        </article>
+      `).join("") || `<p class="empty-note">Nenhuma instalacao conectou Google Drive ainda.</p>`}
+    </div>
+  `;
+}
+
 function renderAuthEvents() {
   const list = document.querySelector("#auth-events");
   const events = currentAuthEvents.length > 0
@@ -381,7 +439,9 @@ async function createClient(event) {
   const data = new FormData(form);
   const result = document.querySelector("#pairing-result");
   const tronsoft = currentUser.role === "tronsoft_admin";
-  const selectedReseller = currentResellers.find((reseller) => reseller.id === data.get("resellerId"));
+  const selectedReseller = data.get("resellerId") === directTronsoftOption.id
+    ? directTronsoftOption
+    : currentResellers.find((reseller) => reseller.id === data.get("resellerId"));
 
   result.hidden = false;
   result.textContent = "Gerando token...";
@@ -396,7 +456,11 @@ async function createClient(event) {
       method: "POST",
       body: JSON.stringify({
         reseller: tronsoft && selectedReseller
-          ? { name: selectedReseller.name, document: selectedReseller.document }
+          ? {
+              name: selectedReseller.name,
+              document: selectedReseller.document,
+              directTronsoft: Boolean(selectedReseller.directTronsoft)
+            }
           : {
               name: data.get("resellerName"),
               document: data.get("resellerDocument")
@@ -422,6 +486,11 @@ async function createClient(event) {
   }
 }
 
+function requestMaintenanceUpdate() {
+  const result = document.querySelector("#maintenance-result");
+  result.textContent = "Atualizacao automatica por botao ainda precisa de autorizacao explicita para executar script privilegiado no Debian.";
+}
+
 async function createReseller(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -436,11 +505,17 @@ async function createReseller(event) {
       method: "POST",
       body: JSON.stringify({
         name: data.get("name"),
-        document: data.get("document")
+        document: data.get("document"),
+        accessEmail: data.get("accessEmail"),
+        password: data.get("password")
       })
     });
 
-    result.textContent = `Revenda salva: ${reseller.name}`;
+    result.innerHTML = `
+      <strong>Revenda salva: ${escapeHtml(reseller.reseller.name)}</strong><br>
+      <span>Acesso: ${escapeHtml(reseller.accessUser.email)}</span>
+      ${reseller.temporaryPassword ? `<br><code>Senha temporaria: ${escapeHtml(reseller.temporaryPassword)}</code>` : ""}
+    `;
     form.reset();
     await configureScopeControls();
     await loadCentralData();
@@ -463,5 +538,6 @@ document.querySelector("#client-filter").addEventListener("input", (event) => {
 });
 document.querySelector("#client-form").addEventListener("submit", createClient);
 document.querySelector("#reseller-form").addEventListener("submit", createReseller);
+document.querySelector("#maintenance-update-button").addEventListener("click", requestMaintenanceUpdate);
 
 loadSession();

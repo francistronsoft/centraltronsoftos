@@ -13,6 +13,7 @@ const sessionCookie = "central_session";
 const sessionMaxAgeSeconds = 12 * 60 * 60;
 const tronsoftRole = "tronsoft_admin";
 const resellerRole = "reseller_user";
+const googleDriveScope = "https://www.googleapis.com/auth/drive.file";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -51,6 +52,18 @@ function clientKey(customer) {
 
 function generatePairingToken() {
   return `cts_${randomUUID().replace(/-/g, "")}`;
+}
+
+function generateTemporaryPassword() {
+  return randomBytes(9).toString("base64url");
+}
+
+function directTronsoftResellerPayload() {
+  return {
+    name: "TronSoft",
+    document: "TRONSOFT-DIRETO",
+    accessEmail: process.env.CENTRAL_ADMIN_EMAIL || "suporte@tronsoft.com.br"
+  };
 }
 
 async function readJson(request) {
@@ -131,6 +144,16 @@ function publicUser(user) {
     role: user.role,
     resellerId: user.resellerId || null,
     status: user.status
+  };
+}
+
+function publicReseller(reseller, db) {
+  if (!reseller) return null;
+  const accessUser = db?.users?.find((user) => user.resellerId === reseller.id && user.role === resellerRole) || null;
+  return {
+    ...reseller,
+    accessEmail: accessUser?.email || reseller.accessEmail || "",
+    accessUser: accessUser ? publicUser(accessUser) : null
   };
 }
 
@@ -237,6 +260,7 @@ function requireText(value, field) {
 function findOrCreateReseller(db, resellerPayload) {
   const name = resellerPayload?.name?.trim() || "TronSoftOS Direto";
   const document = resellerPayload?.document?.trim() || "";
+  const accessEmail = resellerPayload?.accessEmail?.trim().toLowerCase() || resellerPayload?.email?.trim().toLowerCase() || "";
   const existing = db.resellers.find((reseller) => {
     return document ? reseller.document === document : reseller.name.toLowerCase() === name.toLowerCase();
   });
@@ -244,6 +268,7 @@ function findOrCreateReseller(db, resellerPayload) {
   if (existing) {
     existing.name = name;
     existing.document = document;
+    existing.accessEmail = accessEmail || existing.accessEmail || "";
     existing.updatedAt = nowIso();
     return existing;
   }
@@ -252,12 +277,58 @@ function findOrCreateReseller(db, resellerPayload) {
     id: randomUUID(),
     name,
     document,
+    accessEmail,
     status: "active",
     createdAt: nowIso(),
     updatedAt: nowIso()
   };
   db.resellers.push(reseller);
   return reseller;
+}
+
+function ensureResellerAccessUser(db, reseller, payload) {
+  const email = payload?.accessEmail?.trim().toLowerCase() || payload?.email?.trim().toLowerCase() || reseller.accessEmail;
+  if (!email) {
+    throw httpError(400, "Campo obrigatorio ausente: accessEmail.");
+  }
+  const providedPassword = payload?.password?.trim();
+  const password = providedPassword || generateTemporaryPassword();
+  const existing = db.users.find((user) => user.email.toLowerCase() === email);
+
+  if (existing && existing.role !== resellerRole) {
+    throw httpError(409, "Email ja utilizado por um usuario administrativo.");
+  }
+  if (existing && existing.resellerId && existing.resellerId !== reseller.id) {
+    throw httpError(409, "Email ja vinculado a outra revenda.");
+  }
+
+  if (existing) {
+    existing.name = payload?.accessName?.trim() || existing.name || reseller.name;
+    existing.role = resellerRole;
+    existing.resellerId = reseller.id;
+    existing.status = "active";
+    if (payload?.password?.trim()) {
+      existing.passwordHash = hashPassword(password);
+    }
+    existing.updatedAt = nowIso();
+    reseller.accessEmail = email;
+    return { user: existing, temporaryPassword: null };
+  }
+
+  const user = {
+    id: randomUUID(),
+    name: payload?.accessName?.trim() || reseller.name,
+    email,
+    passwordHash: hashPassword(password),
+    role: resellerRole,
+    resellerId: reseller.id,
+    status: "active",
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
+  db.users.push(user);
+  reseller.accessEmail = email;
+  return { user, temporaryPassword: providedPassword ? null : password };
 }
 
 function findOrCreateClient(db, reseller, customerPayload) {
@@ -435,6 +506,108 @@ function publicInstallation(db, installation) {
   };
 }
 
+function centralPublicUrl(request) {
+  return (process.env.CENTRAL_PUBLIC_URL || `${String(request.headers["x-forwarded-proto"] || "http")}://${request.headers.host}`).replace(/\/+$/, "");
+}
+
+function googleOAuthConfig(request) {
+  return {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+    redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI || `${centralPublicUrl(request)}/api/oauth/google/callback`
+  };
+}
+
+function requireGoogleOAuthConfig(request) {
+  const config = googleOAuthConfig(request);
+  if (!config.clientId || !config.clientSecret) {
+    throw httpError(503, "0auth Google Drive nao configurado na Central.");
+  }
+  return config;
+}
+
+function findInstallationByToken(db, request) {
+  const token = request.headers["x-installation-token"];
+  if (!token) {
+    throw httpError(401, "Token da instalacao ausente.");
+  }
+  const installation = db.installations.find((item) => item.token === token);
+  if (!installation) {
+    throw httpError(404, "Instalacao TronSoftOS nao encontrada.");
+  }
+  return installation;
+}
+
+function latestOAuthCredential(db, installation, provider = "google") {
+  return [...db.oauthCredentials]
+    .reverse()
+    .find((credential) => credential.installationId === installation.installationId && credential.provider === provider && credential.status === "connected") || null;
+}
+
+function publicOAuthStatus(db, installation, request) {
+  const credential = latestOAuthCredential(db, installation);
+  const config = googleOAuthConfig(request);
+  return {
+    installationId: installation.installationId,
+    provider: "google",
+    purpose: "database_backup_drive",
+    configured: Boolean(config.clientId && config.clientSecret),
+    connected: Boolean(credential),
+    accountEmail: credential?.accountEmail || "",
+    scopes: credential?.scopes || [],
+    connectedAt: credential?.connectedAt || null,
+    updatedAt: credential?.updatedAt || null
+  };
+}
+
+async function exchangeGoogleCode(config, code) {
+  const body = new URLSearchParams({
+    code,
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    redirect_uri: config.redirectUri,
+    grant_type: "authorization_code"
+  });
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(502, payload.error_description || payload.error || "Falha ao trocar codigo Google.");
+  }
+  return payload;
+}
+
+async function refreshGoogleToken(credential, request) {
+  const config = requireGoogleOAuthConfig(request);
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: credential.refreshToken,
+    grant_type: "refresh_token"
+  });
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(502, payload.error_description || payload.error || "Falha ao renovar token Google.");
+  }
+  return payload;
+}
+
+async function fetchGoogleUserInfo(accessToken) {
+  const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (!response.ok) return {};
+  return response.json().catch(() => ({}));
+}
+
 function dashboard(db) {
   const criticalAlerts = db.alerts.filter((alert) => alert.status === "open" && alert.severity === "critical").length;
   const online = db.installations.filter((installation) => installation.status === "online").length;
@@ -513,7 +686,7 @@ async function handleCreateClient(request, response) {
   const user = requireUser(db, request);
   const reseller = user.role === resellerRole
     ? db.resellers.find((item) => item.id === user.resellerId)
-    : findOrCreateReseller(db, payload.reseller);
+    : findOrCreateReseller(db, payload.reseller?.directTronsoft ? directTronsoftResellerPayload() : payload.reseller);
   if (!reseller) {
     throw httpError(400, "Revenda do usuario nao encontrada.");
   }
@@ -544,9 +717,143 @@ async function handleCreateReseller(request, response) {
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
   requireTronsoft(user);
-  const reseller = findOrCreateReseller(db, payload.reseller || payload);
+  const resellerPayload = payload.reseller || payload;
+  const reseller = findOrCreateReseller(db, resellerPayload);
+  if (!reseller.document) {
+    throw httpError(400, "Campo obrigatorio ausente: document.");
+  }
+  const access = ensureResellerAccessUser(db, reseller, resellerPayload);
   await writeDb(db);
-  sendJson(response, 201, reseller);
+  sendJson(response, 201, {
+    reseller: publicReseller(reseller, db),
+    accessUser: publicUser(access.user),
+    temporaryPassword: access.temporaryPassword
+  });
+}
+
+async function handleOAuthStatus(request, response) {
+  const db = await readDb();
+  const installation = findInstallationByToken(db, request);
+  sendJson(response, 200, publicOAuthStatus(db, installation, request));
+}
+
+async function handleOAuthStart(request, response) {
+  const config = requireGoogleOAuthConfig(request);
+  const payload = await readJson(request);
+  const db = await readDb();
+  const installation = findInstallationByToken(db, request);
+  const state = randomUUID();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const authState = {
+    id: randomUUID(),
+    state,
+    provider: "google",
+    installationId: installation.installationId,
+    clientId: installation.clientId,
+    status: "pending",
+    requestedBy: payload.requestedBy || "tronsoftos",
+    createdAt: nowIso(),
+    expiresAt
+  };
+  db.oauthStates.push(authState);
+  db.oauthEvents.push({ id: randomUUID(), type: "google_start", installationId: installation.installationId, createdAt: nowIso() });
+  await writeDb(db);
+
+  const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authorizationUrl.searchParams.set("client_id", config.clientId);
+  authorizationUrl.searchParams.set("redirect_uri", config.redirectUri);
+  authorizationUrl.searchParams.set("response_type", "code");
+  authorizationUrl.searchParams.set("scope", googleDriveScope);
+  authorizationUrl.searchParams.set("access_type", "offline");
+  authorizationUrl.searchParams.set("prompt", "consent");
+  authorizationUrl.searchParams.set("state", state);
+
+  sendJson(response, 201, {
+    provider: "google",
+    purpose: "database_backup_drive",
+    authorizationUrl: authorizationUrl.toString(),
+    state,
+    expiresAt
+  });
+}
+
+async function handleOAuthCallback(request, response, url) {
+  const error = url.searchParams.get("error");
+  const state = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const db = await readDb();
+  const oauthState = db.oauthStates.find((item) => item.state === state && item.provider === "google");
+
+  if (error) {
+    throw httpError(400, `Google recusou autorizacao: ${error}`);
+  }
+  if (!oauthState || oauthState.status !== "pending" || new Date(oauthState.expiresAt).getTime() < Date.now()) {
+    throw httpError(400, "Solicitacao 0auth invalida ou expirada.");
+  }
+  if (!code) {
+    throw httpError(400, "Codigo Google ausente.");
+  }
+
+  const tokenPayload = await exchangeGoogleCode(requireGoogleOAuthConfig(request), code);
+  const userInfo = await fetchGoogleUserInfo(tokenPayload.access_token);
+  const installation = db.installations.find((item) => item.installationId === oauthState.installationId);
+  if (!installation) {
+    throw httpError(404, "Instalacao TronSoftOS nao encontrada.");
+  }
+  const existing = latestOAuthCredential(db, installation);
+  const credential = existing || {
+    id: randomUUID(),
+    provider: "google",
+    purpose: "database_backup_drive",
+    installationId: installation.installationId,
+    clientId: installation.clientId,
+    createdAt: nowIso()
+  };
+
+  credential.status = "connected";
+  credential.accountEmail = userInfo.email || "";
+  credential.scopes = String(tokenPayload.scope || googleDriveScope).split(/\s+/).filter(Boolean);
+  credential.accessToken = tokenPayload.access_token;
+  credential.refreshToken = tokenPayload.refresh_token || credential.refreshToken;
+  credential.tokenType = tokenPayload.token_type || "Bearer";
+  credential.expiresAt = new Date(Date.now() + Number(tokenPayload.expires_in || 3600) * 1000).toISOString();
+  credential.connectedAt = credential.connectedAt || nowIso();
+  credential.updatedAt = nowIso();
+
+  if (!existing) db.oauthCredentials.push(credential);
+  oauthState.status = "completed";
+  oauthState.completedAt = nowIso();
+  db.oauthEvents.push({ id: randomUUID(), type: "google_connected", installationId: installation.installationId, accountEmail: credential.accountEmail, createdAt: nowIso() });
+  await writeDb(db);
+
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>0auth concluido</title><body style="font-family:Arial;padding:32px"><h1>Google Drive conectado</h1><p>Conta autorizada para backups do TronSoftOS.</p><p>Voce ja pode fechar esta janela.</p></body></html>`);
+}
+
+async function handleOAuthAccessToken(request, response) {
+  const db = await readDb();
+  const installation = findInstallationByToken(db, request);
+  const credential = latestOAuthCredential(db, installation);
+  if (!credential) {
+    throw httpError(404, "Google Drive ainda nao conectado para esta instalacao.");
+  }
+
+  if (new Date(credential.expiresAt).getTime() < Date.now() + 60 * 1000) {
+    const refreshed = await refreshGoogleToken(credential, request);
+    credential.accessToken = refreshed.access_token;
+    credential.expiresAt = new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString();
+    credential.scopes = String(refreshed.scope || credential.scopes.join(" ")).split(/\s+/).filter(Boolean);
+    credential.updatedAt = nowIso();
+    await writeDb(db);
+  }
+
+  sendJson(response, 200, {
+    provider: "google",
+    tokenType: credential.tokenType || "Bearer",
+    accessToken: credential.accessToken,
+    expiresAt: credential.expiresAt,
+    scopes: credential.scopes || []
+  });
 }
 
 async function handleCreateUser(request, response) {
@@ -667,6 +974,8 @@ async function handleAlert(request, response) {
 }
 
 async function handleApi(request, response, pathname) {
+  const url = new URL(request.url || "/", `http://${request.headers.host}`);
+
   if (request.method === "OPTIONS") {
     sendJson(response, 204, {});
     return;
@@ -674,6 +983,11 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/health") {
     sendJson(response, 200, { ok: true, service: "central-tronsoftos", storage: storageInfo(), checkedAt: nowIso() });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/oauth/google/callback") {
+    await handleOAuthCallback(request, response, url);
     return;
   }
 
@@ -727,9 +1041,23 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/tronsoftos/oauth/google/status") {
+    await handleOAuthStatus(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/tronsoftos/oauth/google/start") {
+    await handleOAuthStart(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/tronsoftos/oauth/google/token") {
+    await handleOAuthAccessToken(request, response);
+    return;
+  }
+
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
-  const url = new URL(request.url || "/", `http://${request.headers.host}`);
   const resellerId = user.role === tronsoftRole ? url.searchParams.get("resellerId") || "" : "";
 
   if (request.method === "GET" && pathname === "/api/dashboard") {
@@ -747,13 +1075,39 @@ async function handleApi(request, response, pathname) {
     const resellers = user.role === tronsoftRole
       ? db.resellers
       : db.resellers.filter((reseller) => reseller.id === user.resellerId);
-    sendJson(response, 200, resellers);
+    sendJson(response, 200, resellers.map((reseller) => publicReseller(reseller, db)));
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/users") {
     requireTronsoft(user);
     sendJson(response, 200, db.users.map(publicUser));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/oauth/google/summary") {
+    const installations = scopedInstallations(db, user, resellerId);
+    const installationIds = new Set(installations.map((installation) => installation.installationId));
+    const credentials = db.oauthCredentials.filter((credential) => {
+      return credential.provider === "google" && installationIds.has(credential.installationId);
+    });
+    const config = googleOAuthConfig(request);
+    sendJson(response, 200, {
+      provider: "google",
+      purpose: "database_backup_drive",
+      configured: Boolean(config.clientId && config.clientSecret),
+      redirectUri: config.redirectUri,
+      connected: credentials.filter((credential) => credential.status === "connected").length,
+      installations: installations.length,
+      accounts: credentials
+        .filter((credential) => credential.status === "connected")
+        .map((credential) => ({
+          installationId: credential.installationId,
+          accountEmail: credential.accountEmail || "",
+          connectedAt: credential.connectedAt,
+          updatedAt: credential.updatedAt
+        }))
+    });
     return;
   }
 

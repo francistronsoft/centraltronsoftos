@@ -72,6 +72,17 @@ CENTRAL_ADMIN_EMAIL=suporte@tronsoft.com.br
 CENTRAL_ADMIN_PASSWORD
 ```
 
+Para ativar o 0auth Google Drive usado pelos backups do TronSoftOS, configure no `/etc/central-tronsoftos/central.env`:
+
+```text
+CENTRAL_PUBLIC_URL=https://central.tronsoft.app.br
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URI=https://central.tronsoft.app.br/api/oauth/google/callback
+```
+
+No Google Cloud Console, a URI autorizada de redirecionamento deve ser exatamente a mesma `GOOGLE_OAUTH_REDIRECT_URI`.
+
 ## API inicial
 
 A primeira implementacao recebe:
@@ -83,6 +94,15 @@ A primeira implementacao recebe:
 - engine, versao e schema do banco usado pelo cliente;
 - heartbeats de saude;
 - notificacoes e alertas.
+- 0auth Google Drive para backups: status, inicio do consentimento, callback e renovacao de token.
+
+Endpoints 0auth consumidos pelo TronSoftOS, sempre com `x-installation-token`:
+
+```text
+GET  /api/tronsoftos/oauth/google/status
+POST /api/tronsoftos/oauth/google/start
+POST /api/tronsoftos/oauth/google/token
+```
 
 Persistencia:
 

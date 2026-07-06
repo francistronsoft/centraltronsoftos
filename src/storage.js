@@ -14,7 +14,10 @@ const emptyDb = {
   pairingTokens: [],
   installations: [],
   alerts: [],
-  events: []
+  events: [],
+  oauthStates: [],
+  oauthCredentials: [],
+  oauthEvents: []
 };
 
 let pgPool = null;

@@ -412,6 +412,56 @@ input[type="search"] {
   overflow: auto;
 }
 
+.oauth-summary {
+  padding: 18px;
+}
+
+.oauth-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.oauth-contract {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfd;
+  margin-bottom: 18px;
+}
+
+.oauth-contract code {
+  display: block;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--brand-strong);
+  background: #fff;
+}
+
+.oauth-accounts {
+  max-height: none;
+  padding: 0;
+}
+
+.maintenance-box {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.maintenance-box .primary-button {
+  width: fit-content;
+}
+
+.maintenance-result {
+  color: var(--muted);
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -533,6 +583,7 @@ tr:last-child td {
 
   .metrics,
   .dashboard-grid,
+  .oauth-grid,
   .map-layout,
   .client-form {
     grid-template-columns: 1fr;
