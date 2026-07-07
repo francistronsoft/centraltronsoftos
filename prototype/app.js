@@ -43,6 +43,39 @@ const severityLabels = {
   info: "Info"
 };
 
+const cityOptions = [
+  ["Mafra", "SC"],
+  ["Rio Negro", "PR"],
+  ["Curitiba", "PR"],
+  ["Joinville", "SC"],
+  ["Florianopolis", "SC"],
+  ["Sao Paulo", "SP"],
+  ["Rio de Janeiro", "RJ"],
+  ["Belo Horizonte", "MG"],
+  ["Porto Alegre", "RS"],
+  ["Brasilia", "DF"],
+  ["Goiania", "GO"],
+  ["Cuiaba", "MT"],
+  ["Campo Grande", "MS"],
+  ["Salvador", "BA"],
+  ["Recife", "PE"],
+  ["Fortaleza", "CE"],
+  ["Natal", "RN"],
+  ["Joao Pessoa", "PB"],
+  ["Maceio", "AL"],
+  ["Aracaju", "SE"],
+  ["Teresina", "PI"],
+  ["Sao Luis", "MA"],
+  ["Belem", "PA"],
+  ["Macapa", "AP"],
+  ["Palmas", "TO"],
+  ["Manaus", "AM"],
+  ["Boa Vista", "RR"],
+  ["Porto Velho", "RO"],
+  ["Rio Branco", "AC"],
+  ["Vitoria", "ES"]
+];
+
 function initials(value) {
   return String(value || "?")
     .split(/\s+/)
@@ -509,6 +542,10 @@ function renderDashboardClients() {
             </div>
           </div>
           <div>${escapeHtml(client.reseller)}</div>
+          <div class="database-cell">
+            <strong>${escapeHtml(client.database || "-")}</strong>
+            <small>versao_banco</small>
+          </div>
           <div><span class="status ${escapeHtml(status)}">${escapeHtml(statusLabels[status] || status)}</span></div>
           <div class="disk-cell">
             <strong>${disk === null ? "--" : `${disk}%`}</strong>
@@ -520,6 +557,27 @@ function renderDashboardClients() {
       `;
     })
     .join("") || `<div class="empty-monitor">Nenhum cliente neste filtro.</div>`;
+}
+
+function setupCityOptions() {
+  const list = document.querySelector("#city-options");
+  if (!list) return;
+  list.innerHTML = cityOptions
+    .map(([city, state]) => `<option value="${escapeHtml(city)} / ${escapeHtml(state)}"></option>`)
+    .join("");
+}
+
+function normalizeCitySelection(formData) {
+  const rawCity = String(formData.get("customerCity") || "").trim();
+  const rawState = String(formData.get("customerState") || "").trim();
+  const match = rawCity.match(/^(.+?)\s*\/\s*([A-Za-z]{2})$/);
+  if (!match) {
+    return { city: rawCity, state: rawState };
+  }
+  return {
+    city: match[1].trim(),
+    state: match[2].trim().toUpperCase()
+  };
 }
 
 function alertContext(alert) {
@@ -713,6 +771,7 @@ async function createClient(event) {
   const form = event.currentTarget;
   const data = new FormData(form);
   const result = document.querySelector("#pairing-result");
+  const location = normalizeCitySelection(data);
   const tronsoft = currentUser.role === "tronsoft_admin";
   const selectedReseller = data.get("resellerId") === directTronsoftOption.id
     ? directTronsoftOption
@@ -743,8 +802,8 @@ async function createClient(event) {
         customer: {
           name: data.get("customerName"),
           document: data.get("customerDocument"),
-          city: data.get("customerCity"),
-          state: data.get("customerState")
+          city: location.city,
+          state: location.state
         }
       })
     });
@@ -879,4 +938,5 @@ document.querySelector("#maintenance-update-button").addEventListener("click", r
 document.querySelector("#refresh-button").innerHTML = iconRefresh();
 document.querySelector("#logout-button").innerHTML = iconLogout();
 applyTheme(localStorage.getItem(themeKey) || "light");
+setupCityOptions();
 loadSession();

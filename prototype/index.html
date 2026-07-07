@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Central TronSoftOS</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=20260706-ui-polish">
+    <link rel="stylesheet" href="styles.css?v=20260707-db-city-map">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -97,6 +97,7 @@
               <div class="monitor-head">
                 <span>Cliente</span>
                 <span>Revenda</span>
+                <span>Banco</span>
                 <span>Status</span>
                 <span>Disco</span>
                 <span>Backup</span>
@@ -165,8 +166,9 @@
               <input name="resellerDocument" id="reseller-document-input" type="text" placeholder="Documento da revenda">
               <input name="customerName" type="text" placeholder="Cliente" required>
               <input name="customerDocument" type="text" placeholder="Documento do cliente">
-              <input name="customerCity" type="text" placeholder="Cidade">
-              <input name="customerState" type="text" placeholder="UF">
+              <input name="customerCity" type="text" placeholder="Cidade" list="city-options">
+              <input name="customerState" type="text" placeholder="UF" maxlength="2">
+              <datalist id="city-options"></datalist>
               <button class="primary-button" type="submit">Gerar token</button>
             </form>
             <div id="pairing-result" class="pairing-result" hidden></div>
@@ -260,6 +262,6 @@
       </main>
     </div>
 
-    <script src="app.js?v=20260706-ui-polish"></script>
+    <script src="app.js?v=20260707-db-city-map"></script>
   </body>
 </html>

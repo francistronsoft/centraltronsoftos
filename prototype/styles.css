@@ -316,7 +316,13 @@ p {
 .monitor-head,
 .monitor-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.45fr) minmax(130px, 0.9fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr);
+  grid-template-columns:
+    minmax(210px, 1.35fr)
+    minmax(120px, 0.85fr)
+    minmax(92px, 0.55fr)
+    minmax(105px, 0.65fr)
+    minmax(105px, 0.65fr)
+    minmax(128px, 0.75fr);
   gap: 18px;
   align-items: center;
 }
@@ -352,6 +358,20 @@ p {
 .monitor-client span:not(.client-avatar) {
   color: var(--muted);
   font-size: 13px;
+}
+
+.database-cell {
+  display: grid;
+  gap: 3px;
+}
+
+.database-cell strong {
+  font-size: 16px;
+}
+
+.database-cell small {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .client-avatar {
@@ -516,7 +536,14 @@ input[type="search"] {
 
 .client-form {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns:
+    minmax(150px, 1fr)
+    minmax(150px, 1fr)
+    minmax(170px, 1fr)
+    minmax(150px, 1fr)
+    minmax(150px, 1fr)
+    72px
+    minmax(130px, 0.8fr);
   gap: 10px;
   padding: 18px;
 }
