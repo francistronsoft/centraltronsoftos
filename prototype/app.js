@@ -661,25 +661,34 @@ function renderGeoMap() {
   });
 
   const points = [...groups.values()].sort((a, b) => b.count - a.count || a.state.localeCompare(b.state));
-  const stateTotals = new Map();
-  points.forEach((point) => {
-    const current = stateTotals.get(point.state) || { count: 0, online: 0, warning: 0 };
-    current.count += point.count;
-    current.online += point.online;
-    current.warning += point.warning;
-    stateTotals.set(point.state, current);
-  });
-  const states = ["AC", "AM", "RR", "RO", "PA", "AP", "TO", "MA", "PI", "CE", "RN", "PB", "PE", "AL", "SE", "BA", "MT", "MS", "GO", "DF", "MG", "ES", "RJ", "SP", "PR", "SC", "RS"];
+  const totalClients = points.reduce((sum, point) => sum + point.count, 0);
+  const onlineClients = points.reduce((sum, point) => sum + point.online, 0);
+  const warningClients = points.reduce((sum, point) => sum + point.warning, 0);
   map.innerHTML = `
-    <div class="uf-map">
-      ${states.map((state) => {
-        const total = stateTotals.get(state);
-        const tone = !total ? "empty" : total.warning > 0 ? "warning" : "online";
-        return `<button class="uf-tile ${tone}" type="button" title="${state}: ${total?.count || 0} cliente(s)">
-          <strong>${state}</strong>
-          <span>${total?.count || ""}</span>
-        </button>`;
-      }).join("")}
+    <div class="brazil-map-stage">
+      <svg class="brazil-shape" viewBox="0 0 360 360" aria-hidden="true" focusable="false">
+        <path d="M126 35 170 22 213 40 246 35 279 64 286 101 318 132 303 171 322 211 293 243 279 287 243 304 211 335 168 315 133 325 96 298 87 253 55 224 68 184 43 146 70 113 72 72z"></path>
+        <path class="brazil-shape-inner" d="M119 72 162 54 213 68 251 84 272 126 281 168 270 213 241 254 202 289 158 293 117 271 91 232 83 184 92 135z"></path>
+      </svg>
+      <div class="map-markers">
+        ${points.map((point, index) => {
+          const [x, y] = ufCoordinates[point.state];
+          const drift = ((index % 5) - 2) * 1.7;
+          const tone = point.warning > 0 ? "warning" : "online";
+          const label = `${point.city} / ${point.state}: ${point.count} cliente(s)`;
+          return `
+            <button class="map-pin ${tone}" type="button" style="--x: ${x + drift}%; --y: ${y + (drift / 2)}%;" title="${escapeHtml(label)}">
+              <span>${point.count}</span>
+              <small>${escapeHtml(point.state)}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <div class="map-summary">
+        <strong>${totalClients}</strong>
+        <span>cliente(s) mapeado(s)</span>
+        <small>${onlineClients} online, ${warningClients} em atencao</small>
+      </div>
     </div>
   `;
 
