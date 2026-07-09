@@ -596,6 +596,33 @@ function appendDatabaseHistory(installation) {
   installation.database.history = history.slice(-370);
 }
 
+function isIndexAlert(alert) {
+  const text = `${alert.code || ""} ${alert.title || ""} ${alert.message || ""} ${alert.details?.kind || ""}`.toLowerCase();
+  return text.includes("indice") || text.includes("index");
+}
+
+function indexHealthIsHealthy(database = {}) {
+  const health = database.indexHealth;
+  if (!health) return false;
+  const severity = String(health.severity || health.status || "").toUpperCase();
+  if (severity === "OK" || severity === "INFO") return true;
+  const inactive = Number(health.inactiveIndexes ?? health.inactive ?? health.disabledIndexes ?? 0);
+  const missing = Number(health.missingIndexes ?? health.withoutIndexes ?? health.semIndice ?? 0);
+  const active = Number(health.activeIndexes ?? health.active ?? 0);
+  const total = Number(health.totalIndexes ?? health.total ?? 0);
+  return total > 0 && active > 0 && inactive === 0 && missing === 0;
+}
+
+function resolveIndexAlertsIfHealthy(db, installation) {
+  if (!indexHealthIsHealthy(installation.database)) return;
+  db.alerts.forEach((alert) => {
+    if (alert.installationId !== installation.installationId || alert.status !== "open") return;
+    if (!isIndexAlert(alert)) return;
+    alert.status = "resolved";
+    alert.resolvedAt = nowIso();
+  });
+}
+
 function findInstallationByRequest(db, payload, request) {
   const token = request.headers["x-installation-token"];
   const installationId = payload.installationId;
@@ -1136,6 +1163,7 @@ async function handleHeartbeat(request, response) {
     || installation.database.versaoBanco
     || "";
   appendDatabaseHistory(installation);
+  resolveIndexAlertsIfHealthy(db, installation);
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.backups = { ...(installation.backups || {}), ...(payload.backups || {}) };

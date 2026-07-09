@@ -13,6 +13,8 @@ let currentAuthEvents = [];
 let currentResellers = [];
 let currentUsers = [];
 let currentOAuthSummary = null;
+let usersLoaded = false;
+let oauthSummaryScope = "";
 let activeView = "dashboard";
 let monitorFilter = "all";
 let clientPage = 1;
@@ -303,6 +305,12 @@ function showView(view) {
   if (activeView === "dashboard" && geoLeafletMap) {
     setTimeout(() => geoLeafletMap.invalidateSize(), 80);
   }
+  ensureActiveViewData();
+}
+
+async function ensureActiveViewData() {
+  if (activeView === "users") await loadUsersIfNeeded();
+  if (activeView === "oauth") await loadOAuthSummaryIfNeeded();
 }
 
 async function loadSession() {
@@ -403,18 +411,14 @@ async function configureScopeControls() {
 }
 
 async function loadCentralData() {
-  const [dashboard, registeredClients, installations, alerts, oauthSummary, users] = await Promise.all([
+  const [dashboard, registeredClients, installations, alerts] = await Promise.all([
     api(`/api/dashboard${querySuffix()}`),
     api(`/api/clients${querySuffix()}`),
     api(`/api/installations${querySuffix()}`),
-    api(`/api/alerts${querySuffix()}`),
-    api(`/api/oauth/google/summary${querySuffix()}`),
-    currentUser.role === "tronsoft_admin" ? api("/api/users") : Promise.resolve([])
+    api(`/api/alerts${querySuffix()}`)
   ]);
-  currentOAuthSummary = oauthSummary;
   currentInstallations = installations;
   currentAlerts = alerts;
-  currentUsers = users;
 
   const installationsByClient = new Map();
   installations.forEach((installation) => {
@@ -492,12 +496,33 @@ async function loadCentralData() {
   renderGeoMap();
   renderAuthEvents();
   renderAlerts();
-  renderUsers();
-  renderOAuthSummary();
+  await ensureActiveViewData();
   if (activeView === "client-detail" && selectedClientId) {
     const selected = currentClients.find((client) => client.detailId === selectedClientId || client.id === selectedClientId);
     if (selected) renderClientDetail(selected);
   }
+}
+
+async function loadUsersIfNeeded(force = false) {
+  if (currentUser?.role !== "tronsoft_admin") return;
+  if (usersLoaded && !force) {
+    renderUsers();
+    return;
+  }
+  currentUsers = await api("/api/users");
+  usersLoaded = true;
+  renderUsers();
+}
+
+async function loadOAuthSummaryIfNeeded(force = false) {
+  const scope = querySuffix();
+  if (currentOAuthSummary && oauthSummaryScope === scope && !force) {
+    renderOAuthSummary();
+    return;
+  }
+  currentOAuthSummary = await api(`/api/oauth/google/summary${scope}`);
+  oauthSummaryScope = scope;
+  renderOAuthSummary();
 }
 
 function renderMetrics(dashboard) {
@@ -1444,8 +1469,9 @@ async function createUser(event) {
     renderPasswordResult(result, payload, `Usuario salvo: ${payload.user.email}`);
     form.reset();
     updateUserRoleFields();
+    usersLoaded = false;
     await configureScopeControls();
-    await loadCentralData();
+    await loadUsersIfNeeded(true);
   } catch (error) {
     result.textContent = error.message || "Nao foi possivel salvar o usuario.";
   }
@@ -1467,7 +1493,7 @@ async function resetUserPassword(userId) {
       body: JSON.stringify({ password, sendEmail })
     });
     renderPasswordResult(result, payload, `Senha atualizada: ${payload.user.email}`);
-    await loadCentralData();
+    await loadUsersIfNeeded(true);
   } catch (error) {
     result.textContent = error.message || "Nao foi possivel alterar a senha.";
   }
@@ -1532,6 +1558,9 @@ async function createReseller(event) {
       <span>Cadastre o usuario da revenda no menu Usuarios.</span>
     `;
     form.reset();
+    usersLoaded = false;
+    currentOAuthSummary = null;
+    oauthSummaryScope = "";
     await configureScopeControls();
     await loadCentralData();
   } catch (error) {
@@ -1557,7 +1586,11 @@ document.querySelectorAll("[data-monitor-filter]").forEach((button) => {
     renderDashboardClients();
   });
 });
-document.querySelector("#reseller-filter").addEventListener("change", loadCentralData);
+document.querySelector("#reseller-filter").addEventListener("change", () => {
+  currentOAuthSummary = null;
+  oauthSummaryScope = "";
+  loadCentralData();
+});
 document.querySelector("#alert-filter").addEventListener("change", renderAlerts);
 document.querySelector("#client-filter").addEventListener("input", (event) => {
   clientPage = 1;
