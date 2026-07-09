@@ -24,7 +24,8 @@ const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8"
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml; charset=utf-8"
 };
 
 function nowIso() {
@@ -1429,8 +1430,12 @@ async function serveStatic(request, response, pathname) {
   }
 
   const extension = extname(filePath);
+  const noStore = extension === ".html" || relativePath === "index.html";
   response.writeHead(200, {
-    "content-type": contentTypes[extension] || "application/octet-stream"
+    "content-type": contentTypes[extension] || "application/octet-stream",
+    "cache-control": noStore ? "no-store, max-age=0" : "no-cache, max-age=0, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "0"
   });
   createReadStream(filePath).pipe(response);
 }

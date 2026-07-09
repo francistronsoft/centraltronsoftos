@@ -125,7 +125,22 @@ function formatRelativeTime(value) {
   if (minutes < 60) return `ha ${minutes} min`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `ha ${hours} h`;
-  return new Date(value).toLocaleDateString("pt-BR");
+  return new Date(value).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "-";
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 function backupAgeLabel(minutes) {
@@ -476,7 +491,7 @@ async function loadCentralData() {
       metrics: installation.metrics || {},
       cluster: installation.cluster || {},
       status: installation.status,
-      lastSeen: installation.lastSeenAt ? new Date(installation.lastSeenAt).toLocaleString("pt-BR") : "-",
+      lastSeen: formatDateTime(installation.lastSeenAt),
       lastSeenAt: installation.lastSeenAt || null,
       diskPercent: diskPercent(installation),
       backup: backupSummary(installation),
@@ -1387,7 +1402,7 @@ function renderMaintenanceJob(job) {
   result.innerHTML = `
     <div class="maintenance-status">
       <strong>${job.status === "running" ? "Executando atualizacao" : job.status === "success" ? "Atualizacao concluida" : "Atualizacao falhou"}</strong>
-      <span>${job.finishedAt ? new Date(job.finishedAt).toLocaleString("pt-BR") : "Aguardando conclusao..."}</span>
+      <span>${job.finishedAt ? formatDateTime(job.finishedAt) : "Aguardando conclusao..."}</span>
     </div>
     ${job.error ? `<p>${escapeHtml(job.error)}</p>` : ""}
     <pre>${escapeHtml(output || "Aguardando saida do comando...")}</pre>
