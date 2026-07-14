@@ -1305,6 +1305,29 @@ td {
   vertical-align: bottom;
 }
 
+.token-copy-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.token-copy-button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: var(--brand-strong);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.token-copy-button:hover {
+  border-color: var(--brand);
+  background: var(--surface-strong);
+}
+
 th {
   color: var(--muted);
   font-size: 13px;

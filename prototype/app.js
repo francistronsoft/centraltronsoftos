@@ -245,6 +245,26 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+async function copyTextToClipboard(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand("copy");
+  input.remove();
+  return copied;
+}
+
 function normalizeState(value) {
   return String(value || "").trim().toUpperCase().slice(0, 2);
 }
@@ -606,11 +626,14 @@ function renderClients(filter = "") {
     .map((client) => {
       const location = [client.city, client.state].filter(Boolean).join(" / ") || "-";
       const indexStatus = indexHealthStatus(client);
+      const pairingToken = client.pairingToken
+        ? `<br><span class="token-copy-wrap"><span class="token-cell">${escapeHtml(client.pairingToken)}</span><button class="token-copy-button" type="button" data-copy-token="${escapeHtml(client.pairingToken)}" title="Copiar token">Copiar</button></span>`
+        : "";
       return `
         <tr class="clickable-row" data-client-detail="${escapeHtml(client.detailId)}">
           <td>${escapeHtml(client.name)}<br><span class="muted-cell">${escapeHtml(location)}</span></td>
           <td>${escapeHtml(client.reseller)}</td>
-          <td>${escapeHtml(client.environment)}${client.pairingToken ? `<br><span class="token-cell">${escapeHtml(client.pairingToken)}</span>` : ""}</td>
+          <td>${escapeHtml(client.environment)}${pairingToken}</td>
           <td>${escapeHtml(client.version)}<br><span class="muted-cell">${escapeHtml(client.database || "-")}</span></td>
           <td><span class="index-pill ${escapeHtml(indexStatus.tone)}">${escapeHtml(indexStatus.shortLabel || indexStatus.label)}</span></td>
           <td><span class="status ${escapeHtml(client.status)}">${escapeHtml(statusLabels[client.status] || client.status)}</span></td>
@@ -626,6 +649,21 @@ function renderClients(filter = "") {
   renderClientPagination(visibleClients.length, totalPages);
   table.querySelectorAll("[data-client-detail]").forEach((row) => {
     row.addEventListener("click", () => openClientDetail(row.dataset.clientDetail, "clients"));
+  });
+  table.querySelectorAll("[data-copy-token]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const label = button.textContent;
+      try {
+        const copied = await copyTextToClipboard(button.dataset.copyToken);
+        button.textContent = copied ? "Copiado" : "Falhou";
+      } catch {
+        button.textContent = "Falhou";
+      }
+      setTimeout(() => {
+        button.textContent = label;
+      }, 1400);
+    });
   });
 }
 
