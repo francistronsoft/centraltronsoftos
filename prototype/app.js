@@ -934,12 +934,18 @@ function databaseGrowthChart(database = {}) {
   `;
 }
 
-function metricSeriesValues(metrics = {}, patterns = []) {
-  const series = Array.isArray(metrics.series) ? metrics.series : [];
-  const values = series.filter((metric) => {
+function metricSeriesValues(metrics = {}, valueKeys = [], patterns = []) {
+  const systemMetrics = metrics.systemMetrics || metrics;
+  const series = Array.isArray(systemMetrics.series) && systemMetrics.series.length ? systemMetrics.series : systemMetrics.latest || metrics.series || [];
+  const rows = Array.isArray(series) ? series : [];
+  const values = rows.filter((metric) => {
+    if (!patterns.length) return true;
     const text = `${metric.scope || ""} ${metric.target || ""} ${metric.name || ""} ${metric.key || ""}`.toLowerCase();
     return patterns.some((pattern) => text.includes(pattern));
-  }).map((metric) => Number(metric.value ?? metric.percent ?? metric.valueNumber ?? metric.avg ?? metric.usedPercent)).filter(Number.isFinite);
+  }).map((metric) => {
+    const keyValue = valueKeys.map((key) => Number(metric[key])).find(Number.isFinite);
+    return Number.isFinite(keyValue) ? keyValue : Number(metric.value ?? metric.percent ?? metric.valueNumber ?? metric.avg ?? metric.usedPercent);
+  }).filter(Number.isFinite);
   return values.slice(-18);
 }
 
@@ -991,8 +997,8 @@ function renderClientDetail(client) {
   const openAlerts = currentAlerts.filter((alert) => alert.clientId === client.id && alert.status !== "resolved").length;
   const indexStatus = indexHealthStatus(client);
   const databaseSize = databaseSizeLabel(database);
-  const cpuSeries = metricSeriesValues(metrics, ["cpu", "processor"]);
-  const memorySeries = metricSeriesValues(metrics, ["memory", "memoria", "ram"]);
+  const cpuSeries = metricSeriesValues(metrics, ["cpuPercent"]);
+  const memorySeries = metricSeriesValues(metrics, ["memoryPercent"]);
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
