@@ -516,7 +516,7 @@ function upsertInstallation(db, client, payload) {
     },
     cluster: payload.cluster || {},
     backups: payload.backups || {},
-    metrics: payload.metrics || payload.systemMetrics || {},
+    metrics: incomingMetrics(payload),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso()
@@ -569,7 +569,7 @@ function upsertInstallationForClient(db, client, payload) {
     },
     cluster: payload.cluster || {},
     backups: payload.backups || {},
-    metrics: payload.metrics || payload.systemMetrics || {},
+    metrics: incomingMetrics(payload),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso()
@@ -612,6 +612,15 @@ function appendDatabaseHistory(installation) {
   }
   history.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   installation.database.history = history.slice(-370);
+}
+
+function incomingMetrics(payload = {}) {
+  const metrics = payload.metrics && typeof payload.metrics === "object" ? payload.metrics : {};
+  const systemMetrics = payload.systemMetrics && typeof payload.systemMetrics === "object" ? payload.systemMetrics : {};
+  return {
+    ...metrics,
+    ...(Object.keys(systemMetrics).length ? { systemMetrics } : {})
+  };
 }
 
 function isIndexAlert(alert) {
@@ -1233,7 +1242,7 @@ async function handleHeartbeat(request, response) {
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.backups = { ...(installation.backups || {}), ...(payload.backups || {}) };
-  installation.metrics = { ...(installation.metrics || {}), ...(payload.metrics || payload.systemMetrics || {}) };
+  installation.metrics = { ...(installation.metrics || {}), ...incomingMetrics(payload) };
   installation.lastSeenAt = nowIso();
   installation.updatedAt = nowIso();
 

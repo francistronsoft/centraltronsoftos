@@ -61,6 +61,35 @@ function compactBackups(backups = {}) {
   return next;
 }
 
+function compactDatabase(database = {}) {
+  if (!database || typeof database !== "object") return {};
+  const next = { ...database };
+  if (next.indexHealth && typeof next.indexHealth === "object") {
+    const health = next.indexHealth;
+    next.indexHealth = {
+      severity: health.severity,
+      status: health.status,
+      checkedAt: health.checkedAt,
+      databaseName: health.databaseName,
+      databaseAlias: health.databaseAlias,
+      totalIndexes: health.totalIndexes,
+      activeIndexes: health.activeIndexes,
+      inactiveIndexes: health.inactiveIndexes,
+      userIndexes: health.userIndexes,
+      activeUserIndexes: health.activeUserIndexes,
+      inactiveUserIndexes: health.inactiveUserIndexes,
+      activeRatio: health.activeRatio,
+      userActiveRatio: health.userActiveRatio,
+      currentSizeBytes: health.currentSizeBytes,
+      previousMaxSizeBytes: health.previousMaxSizeBytes,
+      previousMaxCollectedAt: health.previousMaxCollectedAt,
+      sizeDropPercent: health.sizeDropPercent,
+      missingActiveTables: Array.isArray(health.missingActiveTables) ? health.missingActiveTables.slice(0, 50) : []
+    };
+  }
+  return next;
+}
+
 function compactEvent(event = {}) {
   const payload = event.payload || {};
   return {
@@ -83,6 +112,7 @@ function compactDb(db) {
   const next = withDefaults(db);
   next.installations = next.installations.map((installation) => ({
     ...installation,
+    database: compactDatabase(installation.database),
     backups: compactBackups(installation.backups),
     metrics: compactMetricSeries(installation.metrics)
   }));
