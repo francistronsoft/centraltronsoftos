@@ -762,11 +762,28 @@ function databaseSizeLabel(database = {}) {
   return "-";
 }
 
+function isRcloneAlert(alert = {}) {
+  const text = `${alert.code || ""} ${alert.title || ""} ${alert.message || ""}`.toLowerCase();
+  return text.includes("rclone");
+}
+
+function isCommonIndexAlert(alert = {}) {
+  const text = `${alert.code || ""} ${alert.title || ""} ${alert.message || ""}`.toLowerCase();
+  return text.includes("indices comuns") || text.includes("indices inativo") || text.includes("indice(s) inativo");
+}
+
+function isVisibleAlert(alert = {}) {
+  return !isRcloneAlert(alert) && !isCommonIndexAlert(alert);
+}
+
 function indexHealthStatus(client) {
   const health = client.databaseInfo?.indexHealth;
   const alert = currentAlerts.find((item) => {
     const text = `${item.code || ""} ${item.title || ""} ${item.message || ""}`.toLowerCase();
-    return item.clientId === client.id && item.status !== "resolved" && (text.includes("indice") || text.includes("index"));
+    return item.clientId === client.id
+      && item.status !== "resolved"
+      && isVisibleAlert(item)
+      && (text.includes("indice") || text.includes("index"));
   });
   const severity = String(health?.severity || health?.status || "").toLowerCase();
   const inactive = Number(health?.inactiveIndexes ?? health?.inactive ?? health?.disabledIndexes ?? 0);
@@ -792,7 +809,7 @@ function indexHealthStatus(client) {
         : `${missing} indice(s) ausente(s)`
     };
   }
-  if (hasSummary && (severity === "critical" || severity === "offline" || alert?.severity === "critical")) {
+  if (hasSummary && alert) {
     return {
       label: "Indice em atencao",
       shortLabel: "Atencao",
@@ -800,17 +817,8 @@ function indexHealthStatus(client) {
       detail: alert?.message || `${active} / ${total} ativos`
     };
   }
-  if (hasSummary && (inactive > 0 || alert || severity === "warning")) {
-    return {
-      label: "Indice em atencao",
-      shortLabel: "Atencao",
-      tone: "warning",
-      detail: inactive > 0 ? `${inactive} indice(s) inativo(s)` : (alert?.message || "alerta aberto")
-    };
-  }
   if (hasSummary && (severity === "ok" || severity === "info" || Number.isFinite(Number(total)))) {
-    const inactiveDetail = inactive > 0 ? `; ${inactive} inativo(s) nao criticos` : "";
-    return { label: "Indices OK", shortLabel: "OK", tone: "online", detail: `${active} / ${total} ativos${inactiveDetail}` };
+    return { label: "Indices OK", shortLabel: "OK", tone: "online", detail: `${active} / ${total} ativos` };
   }
   if (hasSummary) {
     return { label: "Indices OK", shortLabel: "OK", tone: "online", detail: `${active} ativo(s)` };
@@ -954,16 +962,34 @@ function metricSeriesValues(metrics = {}, valueKeys = [], patterns = []) {
     return patterns.some((pattern) => text.includes(pattern));
   }).map((metric) => {
     const keyValue = valueKeys.map((key) => Number(metric[key])).find(Number.isFinite);
-    return Number.isFinite(keyValue) ? keyValue : Number(metric.value ?? metric.percent ?? metric.valueNumber ?? metric.avg ?? metric.usedPercent);
-  }).filter(Number.isFinite);
+    const value = Number.isFinite(keyValue) ? keyValue : Number(metric.value ?? metric.percent ?? metric.valueNumber ?? metric.avg ?? metric.usedPercent);
+    const dateValue = metric.createdAt || metric.collectedAt || metric.timestamp || metric.time || metric.readAt;
+    const date = dateValue ? new Date(dateValue) : null;
+    const label = date && Number.isFinite(date.getTime())
+      ? date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "sem horario";
+    return { value, label };
+  }).filter((point) => Number.isFinite(point.value));
   return values.slice(-18);
 }
 
 function metricBars(values, tone = "online") {
   if (!values.length) return `<div class="metric-empty">sem serie historica</div>`;
-  const max = Math.max(100, ...values);
-  const bars = values.map((value) => `<span style="height:${Math.max(8, Math.min(96, Math.round((value / max) * 96)))}%"></span>`).join("");
-  return `<div class="mini-bars ${escapeHtml(tone)}">${bars}</div>`;
+  const points = values.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
+  const max = Math.max(100, ...points.map((point) => point.value));
+  const peak = points.reduce((highest, point) => point.value > highest.value ? point : highest, points[0]);
+  const latest = points[points.length - 1];
+  const bars = points.map((point) => {
+    const height = Math.max(8, Math.min(96, Math.round((point.value / max) * 96)));
+    return `<span title="${escapeHtml(point.label)} - ${escapeHtml(point.value.toFixed(1))}%" style="height:${height}%"></span>`;
+  }).join("");
+  return `
+    <div class="mini-bars ${escapeHtml(tone)}">${bars}</div>
+    <div class="metric-chart-caption">
+      <span>Pico ${escapeHtml(peak.value.toFixed(1))}% em ${escapeHtml(peak.label)}</span>
+      <span>Ultima ${escapeHtml(latest.value.toFixed(1))}% em ${escapeHtml(latest.label)}</span>
+    </div>
+  `;
 }
 
 function renderBackupFiles(files = []) {
@@ -979,7 +1005,7 @@ function renderBackupFiles(files = []) {
 }
 
 function renderClientAlerts(client) {
-  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id).slice(0, 8);
+  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && isVisibleAlert(alert)).slice(0, 8);
   if (alerts.length === 0) return `<p class="empty-note">Nenhum alerta recente para este cliente.</p>`;
   return alerts.map((alert) => `
     <article class="detail-list-item ${escapeHtml(alert.severity || "info")}">
@@ -1131,7 +1157,7 @@ function renderClientDetail(client) {
     </section>
 
     <section class="ops-panel">
-      <div class="ops-panel-head"><h3>Alertas e eventos</h3><span>priorize o que exige acao</span></div>
+      <div class="ops-panel-head"><h3>Alertas e eventos</h3></div>
       <div class="detail-list alerts-detail">${renderClientAlerts(client)}</div>
     </section>
   `;
@@ -1186,6 +1212,7 @@ function renderAlerts() {
   const filter = document.querySelector("#alert-filter")?.value || "";
   if (!list) return;
   const visibleAlerts = currentAlerts
+    .filter(isVisibleAlert)
     .filter((alert) => {
       if (filter === "resolved") return alert.status === "resolved";
       if (alert.status === "resolved") return false;
