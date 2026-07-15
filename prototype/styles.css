@@ -1497,8 +1497,15 @@ tr:last-child td {
 }
 
 .event strong,
-.event span {
+.event span,
+.event small {
   display: block;
+}
+
+.event small {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .event span {

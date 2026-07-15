@@ -533,7 +533,8 @@ async function loadCentralData() {
 
     currentAuthEvents = alerts.slice(-4).reverse().map((alert) => ({
       title: alert.title,
-      detail: `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`
+      detail: `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`,
+      occurredAt: alert.openedAt || alert.receivedAt || alert.createdAt || alert.resolvedAt || null
     }));
 
     renderMetrics(dashboard);
@@ -734,7 +735,7 @@ function renderDashboardClients() {
       const status = monitorStatus(client);
       const disk = client.diskPercent;
       const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
-      const detail = client.alert?.message || client.alert?.title || (client.lastSeenAt ? `Ultimo heartbeat ${formatRelativeTime(client.lastSeenAt)}` : "Aguardando heartbeat");
+      const detail = client.alert?.message || client.alert?.title || "";
       const indexStatus = indexHealthStatus(client);
       return `
         <article class="monitor-row clickable-row" data-client-detail="${escapeHtml(client.detailId)}">
@@ -742,7 +743,7 @@ function renderDashboardClients() {
             <span class="client-avatar">${escapeHtml(initials(client.name))}</span>
             <div>
               <strong>${escapeHtml(client.name)}</strong>
-              <span>${escapeHtml(detail)}</span>
+              ${detail ? `<span>${escapeHtml(detail)}</span>` : ""}
             </div>
           </div>
           <div data-label="Revenda">${escapeHtml(client.reseller)}</div>
@@ -1455,13 +1456,14 @@ function renderAuthEvents() {
   const list = document.querySelector("#auth-events");
   const events = currentAuthEvents.length > 0
     ? currentAuthEvents
-    : [{ title: "Sem eventos", detail: "Nenhum alerta recente no escopo atual" }];
+    : [{ title: "Sem eventos", detail: "Nenhum alerta recente no escopo atual", occurredAt: null }];
 
   list.innerHTML = events
     .map(
       (event) => `
         <article class="event">
           <strong>${event.title}</strong>
+          ${event.occurredAt ? `<small>${escapeHtml(formatDateTime(event.occurredAt))}</small>` : ""}
           <span>${event.detail}</span>
         </article>
       `
