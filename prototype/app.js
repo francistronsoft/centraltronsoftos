@@ -547,7 +547,7 @@ async function loadCentralData() {
       }));
     });
 
-    currentAuthEvents = alerts.slice(-12).reverse().map((alert) => {
+    currentAuthEvents = alerts.slice(-5).reverse().map((alert) => {
       const detail = `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`;
       return {
       title: alert.title,
@@ -1509,8 +1509,10 @@ function normalizeCitySelection(formData) {
 function alertContext(alert) {
   const installation = currentInstallations.find((item) => item.installationId === alert.installationId);
   const client = currentClients.find((item) => item.id === alert.clientId);
+  const rawClient = client?.rawClient || installation?.client || {};
   return {
     clientName: client?.name || installation?.client?.name || "Cliente nao identificado",
+    document: rawClient.document || rawClient.customerDocument || "",
     resellerName: client?.reseller || installation?.reseller?.name || "Sem revenda",
     environment: installation?.name || alert.installationId || "-"
   };
@@ -1518,14 +1520,28 @@ function alertContext(alert) {
 
 function renderAlerts() {
   const list = document.querySelector("#alerts-list");
-  const filter = document.querySelector("#alert-filter")?.value || "";
+  const severityFilter = document.querySelector("#alert-filter")?.value || "";
+  const statusFilter = document.querySelector("#alert-status-filter")?.value || "";
+  const textFilter = (document.querySelector("#alert-search")?.value || "").trim().toLowerCase();
   if (!list) return;
   const visibleAlerts = currentAlerts
     .filter(isVisibleAlert)
     .filter((alert) => {
-      if (filter === "resolved") return alert.status === "resolved";
-      if (alert.status === "resolved") return false;
-      return !filter || alert.severity === filter;
+      const context = alertContext(alert);
+      const isResolved = alert.status === "resolved";
+      const searchable = [
+        context.clientName,
+        context.document,
+        context.resellerName,
+        context.environment,
+        alert.title,
+        alert.message,
+        alert.code
+      ].filter(Boolean).join(" ").toLowerCase();
+      if (textFilter && !searchable.includes(textFilter)) return false;
+      if (statusFilter === "open" && isResolved) return false;
+      if (statusFilter === "resolved" && !isResolved) return false;
+      return !severityFilter || alert.severity === severityFilter;
     })
     .slice()
     .sort((a, b) => new Date(b.openedAt || 0) - new Date(a.openedAt || 0));
@@ -1542,7 +1558,7 @@ function renderAlerts() {
           </div>
           <div>
             <span>${escapeHtml(context.clientName)}</span>
-            <small>${escapeHtml(context.resellerName)} / ${escapeHtml(context.environment)}</small>
+            <small>${escapeHtml([context.document, context.resellerName, context.environment].filter(Boolean).join(" / "))}</small>
           </div>
           <div>
             <span>${escapeHtml(alert.status === "resolved" ? "Resolvido" : "Aberto")}</span>
@@ -2028,6 +2044,8 @@ document.querySelector("#reseller-filter").addEventListener("change", () => {
   loadCentralData();
 });
 document.querySelector("#alert-filter").addEventListener("change", renderAlerts);
+document.querySelector("#alert-status-filter").addEventListener("change", renderAlerts);
+document.querySelector("#alert-search").addEventListener("input", renderAlerts);
 document.querySelector("#client-filter")?.addEventListener("input", (event) => {
   clientPage = 1;
   renderClients(event.target.value);

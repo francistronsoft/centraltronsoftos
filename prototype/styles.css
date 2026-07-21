@@ -890,6 +890,27 @@ input[type="search"] {
   width: min(340px, 100%);
 }
 
+.alert-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.alert-filters input,
+.alert-filters select {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.alert-filters input {
+  width: min(320px, 100%);
+}
+
 .client-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

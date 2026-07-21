@@ -312,13 +312,20 @@
                 <h2>Alertas</h2>
                 <p>Ocorrencias recebidas dos TronSoftOS monitorados.</p>
               </div>
-              <select id="alert-filter">
-                <option value="">Todos</option>
-                <option value="critical">Criticos</option>
-                <option value="warning">Atencao</option>
-                <option value="info">Informativos</option>
-                <option value="resolved">Resolvidos</option>
-              </select>
+              <div class="alert-filters">
+                <input id="alert-search" type="search" placeholder="Buscar cliente ou CNPJ">
+                <select id="alert-status-filter">
+                  <option value="">Todos</option>
+                  <option value="open">Abertos</option>
+                  <option value="resolved">Fechados</option>
+                </select>
+                <select id="alert-filter">
+                  <option value="">Todas severidades</option>
+                  <option value="critical">Criticos</option>
+                  <option value="warning">Atencao</option>
+                  <option value="info">Informativos</option>
+                </select>
+              </div>
             </div>
             <div id="alerts-list" class="alerts-list"></div>
           </div>
