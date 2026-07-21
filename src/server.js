@@ -18,6 +18,7 @@ const googleDriveScope = "https://www.googleapis.com/auth/drive.file";
 const updateCommand = process.env.CENTRAL_UPDATE_COMMAND || "/usr/local/sbin/central-tronsoftos-update";
 const updateTimeoutMs = Number(process.env.CENTRAL_UPDATE_TIMEOUT_MS || 15 * 60 * 1000);
 const maxJobLogLength = 80_000;
+const maxMetricSeries = 288;
 const offlineAfterMinutes = Number(process.env.CENTRAL_OFFLINE_AFTER_MINUTES || 5);
 const maintenanceJobs = new Map();
 
@@ -522,7 +523,7 @@ function upsertInstallation(db, client, payload) {
     },
     cluster: payload.cluster || {},
     backups: payload.backups || {},
-    metrics: incomingMetrics(payload),
+    metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso()
@@ -578,7 +579,7 @@ function upsertInstallationForClient(db, client, payload) {
     },
     cluster: payload.cluster || {},
     backups: payload.backups || {},
-    metrics: incomingMetrics(payload),
+    metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
     updatedAt: nowIso()
@@ -623,13 +624,46 @@ function appendDatabaseHistory(installation) {
   installation.database.history = history.slice(-370);
 }
 
-function incomingMetrics(payload = {}) {
+function latestSystemMetricRow(payload = {}, metrics = {}) {
+  const systemMetrics = metrics.systemMetrics && typeof metrics.systemMetrics === "object" ? metrics.systemMetrics : {};
+  const latest = Array.isArray(systemMetrics.latest) ? systemMetrics.latest[0] : systemMetrics.latest;
+  const row = latest && typeof latest === "object" ? { ...latest } : {};
+  const collectedAt = row.collectedAt || systemMetrics.collectedAt || metrics.collectedAt || nowIso();
+  const cpuPercent = row.cpuPercent ?? systemMetrics.cpuPercent ?? metrics.cpuPercent ?? systemMetrics.cpu?.percent;
+  const memoryPercent = row.memoryPercent ?? systemMetrics.memoryPercent ?? metrics.memoryPercent ?? systemMetrics.memory?.usedPercent;
+  const diskUsedPercent = row.diskUsedPercent ?? systemMetrics.diskUsedPercent ?? metrics.diskUsedPercent ?? systemMetrics.disk?.percentUsed;
+  const hostUptimeSeconds = row.hostUptimeSeconds ?? systemMetrics.hostUptimeSeconds ?? metrics.hostUptimeSeconds ?? payload.host?.uptimeSeconds;
+  const normalized = { collectedAt };
+  if (Number.isFinite(Number(cpuPercent))) normalized.cpuPercent = Number(cpuPercent);
+  if (Number.isFinite(Number(memoryPercent))) normalized.memoryPercent = Number(memoryPercent);
+  if (Number.isFinite(Number(diskUsedPercent))) normalized.diskUsedPercent = Number(diskUsedPercent);
+  if (Number.isFinite(Number(hostUptimeSeconds))) normalized.hostUptimeSeconds = Number(hostUptimeSeconds);
+  return Object.keys(normalized).length > 1 ? normalized : null;
+}
+
+function incomingMetrics(payload = {}, previousMetrics = {}) {
   const metrics = payload.metrics && typeof payload.metrics === "object" ? payload.metrics : {};
   const systemMetrics = payload.systemMetrics && typeof payload.systemMetrics === "object" ? payload.systemMetrics : {};
-  return {
+  const next = {
     ...metrics,
     ...(Object.keys(systemMetrics).length ? { systemMetrics } : {})
   };
+  const row = latestSystemMetricRow(payload, next);
+  if (row) {
+    const previousSystem = previousMetrics.systemMetrics && typeof previousMetrics.systemMetrics === "object" ? previousMetrics.systemMetrics : {};
+    const previousSeries = Array.isArray(previousSystem.series) ? previousSystem.series : [];
+    next.systemMetrics = {
+      ...previousSystem,
+      ...(next.systemMetrics || {}),
+      latest: row,
+      series: [...previousSeries, row].slice(-maxMetricSeries)
+    };
+    next.hostUptimeSeconds = row.hostUptimeSeconds ?? next.hostUptimeSeconds ?? previousMetrics.hostUptimeSeconds;
+    next.cpuPercent = row.cpuPercent ?? next.cpuPercent ?? previousMetrics.cpuPercent;
+    next.memoryPercent = row.memoryPercent ?? next.memoryPercent ?? previousMetrics.memoryPercent;
+    next.diskUsedPercent = row.diskUsedPercent ?? next.diskUsedPercent ?? previousMetrics.diskUsedPercent;
+  }
+  return next;
 }
 
 function isIndexAlert(alert) {
@@ -1251,7 +1285,7 @@ async function handleHeartbeat(request, response) {
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.backups = { ...(installation.backups || {}), ...(payload.backups || {}) };
-  installation.metrics = { ...(installation.metrics || {}), ...incomingMetrics(payload) };
+  installation.metrics = incomingMetrics(payload, installation.metrics || {});
   installation.lastSeenAt = nowIso();
   installation.updatedAt = nowIso();
 

@@ -69,29 +69,90 @@
         </header>
 
         <section class="view" data-view="dashboard">
-          <section class="metrics" aria-label="Indicadores">
-            <article class="metric">
-              <span>Revendas</span>
-              <strong id="metric-resellers">0</strong>
+          <section class="ops-dashboard-grid">
+            <article class="panel health-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Saude do ambiente</h2>
+                  <p>Disponibilidade geral dos ambientes monitorados.</p>
+                </div>
+              </div>
+              <div class="health-body">
+                <div class="health-ring" id="dashboard-health-ring" style="--health: 0">
+                  <strong id="dashboard-health-score">0%</strong>
+                </div>
+                <div class="health-stats">
+                  <div><span>Ambientes</span><strong id="metric-clients">0</strong></div>
+                  <div><span>Online</span><strong id="metric-online">0</strong></div>
+                  <div><span>Criticos</span><strong id="metric-alerts">0</strong></div>
+                  <div><span>Revendas</span><strong id="metric-resellers">0</strong></div>
+                </div>
+              </div>
+              <div class="health-legend">
+                <span><i class="ok"></i>OK</span>
+                <span><i class="warning"></i>Atencao</span>
+                <span><i class="offline"></i>Offline</span>
+              </div>
             </article>
-            <article class="metric">
-              <span>Clientes</span>
-              <strong id="metric-clients">0</strong>
+
+            <article class="panel incidents-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Incidentes nas ultimas 24 horas</h2>
+                  <p>Alertas recebidos por hora.</p>
+                </div>
+              </div>
+              <div id="incidents-24h-chart" class="hour-chart"></div>
             </article>
-            <article class="metric">
-              <span>Ambientes online</span>
-              <strong id="metric-online">0</strong>
+
+            <article class="panel server-groups-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Servidores monitorados</h2>
+                  <p>Distribuicao por plataforma.</p>
+                </div>
+              </div>
+              <div id="server-groups" class="server-groups"></div>
             </article>
-            <article class="metric warning">
-              <span>Alertas criticos</span>
-              <strong id="metric-alerts">0</strong>
-            </article>
+
+            <section class="panel map-panel dashboard-map-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Mapa de servidores</h2>
+                  <p>Localizacao aproximada por cidade/UF no Brasil.</p>
+                </div>
+              </div>
+              <div class="map-layout dashboard-map-layout">
+                <div id="geo-map" class="geo-map" aria-label="Mapa operacional do Brasil"></div>
+                <div id="geo-list" class="geo-list"></div>
+              </div>
+            </section>
+
+            <section class="panel top-incidents-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Top 10 incidentes</h2>
+                  <p>Ambientes com alerta aberto.</p>
+                </div>
+              </div>
+              <div id="top-incidents" class="top-incidents"></div>
+            </section>
+
+            <aside class="panel side-panel event-log-panel">
+              <div class="panel-header compact">
+                <div>
+                  <h2>Log de eventos</h2>
+                  <p>Alertas e rotinas da Central.</p>
+                </div>
+              </div>
+              <div id="auth-events" class="event-list"></div>
+            </aside>
           </section>
 
-          <section class="monitor-panel">
+          <section class="monitor-panel pending-panel">
             <div class="monitor-header">
               <div>
-                <h2>Clientes monitorados</h2>
+                <h2>Pareamentos pendentes</h2>
                 <p>Clientes cadastrados aguardando pareamento do TronSoftOS.</p>
               </div>
               <div class="segmented" aria-label="Filtro de status">
@@ -112,31 +173,6 @@
               </div>
               <div id="dashboard-clients-list" class="monitor-list"></div>
             </div>
-          </section>
-
-          <section class="dashboard-grid">
-            <section class="panel map-panel">
-              <div class="panel-header">
-                <div>
-                  <h2>Mapa de clientes</h2>
-                  <p>Distribuicao por cidade e UF dos TronSoftOS/clientes cadastrados.</p>
-                </div>
-              </div>
-              <div class="map-layout">
-                <div id="geo-map" class="geo-map" aria-label="Mapa operacional do Brasil"></div>
-                <div id="geo-list" class="geo-list"></div>
-              </div>
-            </section>
-
-            <aside class="panel side-panel">
-              <div class="panel-header compact">
-                <div>
-                  <h2>Eventos recentes</h2>
-                  <p>Alertas e rotinas da Central.</p>
-                </div>
-              </div>
-              <div id="auth-events" class="event-list"></div>
-            </aside>
           </section>
         </section>
 

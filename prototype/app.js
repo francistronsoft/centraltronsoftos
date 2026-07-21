@@ -536,13 +536,14 @@ async function loadCentralData() {
       }));
     });
 
-    currentAuthEvents = alerts.slice(-4).reverse().map((alert) => ({
+    currentAuthEvents = alerts.slice(-12).reverse().map((alert) => ({
       title: alert.title,
       detail: `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`,
       occurredAt: alert.openedAt || alert.receivedAt || alert.createdAt || alert.resolvedAt || null
     }));
 
     renderMetrics(dashboard);
+    renderOperationalDashboard();
     renderClients(document.querySelector("#client-filter")?.value || "");
     renderDashboardClients();
     renderEnvironments();
@@ -601,10 +602,146 @@ async function loadOAuthSummaryIfNeeded(force = false) {
 }
 
 function renderMetrics(dashboard) {
-  document.querySelector("#metric-resellers").textContent = dashboard.resellers;
-  document.querySelector("#metric-clients").textContent = dashboard.clients;
-  document.querySelector("#metric-online").textContent = dashboard.online;
-  document.querySelector("#metric-alerts").textContent = dashboard.criticalAlerts;
+  const resellers = document.querySelector("#metric-resellers");
+  const clients = document.querySelector("#metric-clients");
+  const online = document.querySelector("#metric-online");
+  const alerts = document.querySelector("#metric-alerts");
+  if (resellers) resellers.textContent = dashboard.resellers;
+  if (clients) clients.textContent = currentClients.filter((client) => client.installation).length || dashboard.clients;
+  if (online) online.textContent = dashboard.online;
+  if (alerts) alerts.textContent = dashboard.criticalAlerts;
+}
+
+function dashboardIcon(name) {
+  const icons = {
+    windows: '<path d="M3 5.5l7-1v7H3z"></path><path d="M12 4.2l9-1.2v8.5h-9z"></path><path d="M3 13h7v7l-7-1z"></path><path d="M12 13h9v8.2l-9-1.2z"></path>',
+    linux: '<path d="M12 3c-2.5 0-4 2-4 5v2.5L5.7 15a3 3 0 0 0 2.7 4.4h7.2a3 3 0 0 0 2.7-4.4L16 10.5V8c0-3-1.5-5-4-5z"></path><path d="M9.5 9h.01"></path><path d="M14.5 9h.01"></path><path d="M10 13h4"></path>',
+    database: '<ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path>',
+    backup: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path>',
+    alert: '<path d="M10.3 3.8L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>',
+    offline: '<path d="M18.4 5.6a9 9 0 1 1-12.8 0"></path><path d="M12 2v10"></path>'
+  };
+  return svgIcon(icons[name] || icons.alert);
+}
+
+function environmentPlatform(client) {
+  const source = [
+    client.host?.os,
+    client.tronsoftos?.channel,
+    client.installation?.tronsoftos?.channel,
+    client.installation?.agent?.type,
+    client.version,
+    client.environment
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (source.includes("windows")) return "windows";
+  return "linux";
+}
+
+function dashboardSummary() {
+  const monitored = currentClients.filter((client) => client.installation);
+  const openAlerts = currentAlerts.filter((alert) => alert.status !== "resolved");
+  const criticalAlerts = openAlerts.filter((alert) => alert.severity === "critical");
+  const windows = monitored.filter((client) => environmentPlatform(client) === "windows").length;
+  const linux = monitored.filter((client) => environmentPlatform(client) === "linux").length;
+  const offline = monitored.filter((client) => client.status === "offline").length;
+  const warning = monitored.filter((client) => client.status === "warning").length;
+  const online = monitored.filter((client) => client.status === "online").length;
+  const backupLate = monitored.filter((client) => client.backup?.tone === "warning").length;
+  const indexProblems = monitored.filter((client) => ["offline", "warning"].includes(indexHealthStatus(client).tone)).length;
+  const health = monitored.length > 0
+    ? Math.max(0, Math.round(((online + warning * 0.45) / monitored.length) * 100))
+    : 0;
+  return { monitored, openAlerts, criticalAlerts, windows, linux, offline, warning, online, backupLate, indexProblems, health };
+}
+
+function renderOperationalDashboard() {
+  const summary = dashboardSummary();
+  const ring = document.querySelector("#dashboard-health-ring");
+  const score = document.querySelector("#dashboard-health-score");
+  if (ring) ring.style.setProperty("--health", summary.health);
+  if (score) score.textContent = `${summary.health}%`;
+  renderIncidents24h();
+  renderServerGroups(summary);
+  renderTopIncidents(summary);
+}
+
+function renderIncidents24h() {
+  const container = document.querySelector("#incidents-24h-chart");
+  if (!container) return;
+  const now = new Date();
+  const buckets = Array.from({ length: 24 }, (_, index) => {
+    const date = new Date(now.getTime() - (23 - index) * 60 * 60 * 1000);
+    return { hour: date.getHours().toString().padStart(2, "0"), count: 0 };
+  });
+  const start = now.getTime() - 24 * 60 * 60 * 1000;
+  currentAlerts.forEach((alert) => {
+    const time = new Date(alert.openedAt || alert.receivedAt || alert.createdAt || 0).getTime();
+    if (!Number.isFinite(time) || time < start) return;
+    const hoursAgo = Math.floor((now.getTime() - time) / (60 * 60 * 1000));
+    const index = 23 - Math.max(0, Math.min(23, hoursAgo));
+    buckets[index].count += 1;
+  });
+  const max = Math.max(1, ...buckets.map((item) => item.count));
+  container.innerHTML = buckets.map((item) => `
+    <span class="hour-bar" title="${item.count} incidente(s) as ${item.hour}h">
+      <i style="height:${Math.max(6, Math.round((item.count / max) * 100))}%"></i>
+      <small>${escapeHtml(item.hour)}</small>
+    </span>
+  `).join("");
+}
+
+function renderServerGroups(summary) {
+  const container = document.querySelector("#server-groups");
+  if (!container) return;
+  const items = [
+    { label: "Windows", value: summary.windows, detail: "Agent Windows", icon: "windows", tone: "danger" },
+    { label: "Linux", value: summary.linux, detail: "TronSoftOS", icon: "linux", tone: "ok" },
+    { label: "Banco", value: summary.monitored.length, detail: "Firebird monitorado", icon: "database", tone: "neutral" },
+    { label: "Backup", value: summary.backupLate, detail: "atrasados", icon: "backup", tone: summary.backupLate ? "warning" : "ok" },
+    { label: "Indices", value: summary.indexProblems, detail: "atencao/sem leitura", icon: "alert", tone: summary.indexProblems ? "danger" : "ok" },
+    { label: "Offline", value: summary.offline, detail: "sem heartbeat", icon: "offline", tone: summary.offline ? "danger" : "ok" }
+  ];
+  container.innerHTML = items.map((item) => `
+    <article class="server-group-card ${escapeHtml(item.tone)}">
+      <span class="server-group-icon">${dashboardIcon(item.icon)}</span>
+      <div>
+        <strong>${item.value}</strong>
+        <span>${escapeHtml(item.label)}</span>
+        <small>${escapeHtml(item.detail)}</small>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderTopIncidents(summary) {
+  const container = document.querySelector("#top-incidents");
+  if (!container) return;
+  const severityWeight = { critical: 0, warning: 1, info: 2 };
+  const incidents = summary.openAlerts
+    .map((alert) => {
+      const client = currentClients.find((item) => item.id === alert.clientId || item.detailId === alert.installationId);
+      return { alert, client };
+    })
+    .sort((left, right) => {
+      const severity = (severityWeight[left.alert.severity] ?? 9) - (severityWeight[right.alert.severity] ?? 9);
+      if (severity !== 0) return severity;
+      return String(left.alert.openedAt || "").localeCompare(String(right.alert.openedAt || ""));
+    })
+    .slice(0, 10);
+
+  container.innerHTML = incidents.map(({ alert, client }) => {
+    const status = alert.severity === "critical" ? "offline" : alert.severity === "warning" ? "warning" : "unknown";
+    return `
+      <article class="incident-row">
+        <span class="incident-kind ${escapeHtml(status)}">${escapeHtml(alert.severity === "critical" ? "Critico" : alert.severity === "warning" ? "Atencao" : "Info")}</span>
+        <div>
+          <strong>${escapeHtml(client?.name || alert.clientName || "Cliente")}</strong>
+          <small>${escapeHtml(alert.title || alert.code || "Incidente")}</small>
+        </div>
+        <span>${escapeHtml(formatRelativeTime(alert.openedAt || alert.receivedAt || alert.createdAt))}</span>
+      </article>
+    `;
+  }).join("") || `<p class="empty-note">Nenhum incidente aberto no escopo atual.</p>`;
 }
 
 function diskPercent(installation) {
@@ -939,6 +1076,14 @@ function indexHealthStatus(client) {
   const missingCriticalTables = Array.isArray(health?.missingActiveTables) ? health.missingActiveTables : [];
   const active = health?.activeIndexes ?? health?.active ?? "-";
   const total = health?.totalIndexes ?? health?.total ?? "-";
+  if (health?.error || severity === "unknown" || severity === "erro" || severity === "error") {
+    return {
+      label: "Indices nao verificados",
+      shortLabel: "Sem leitura",
+      tone: "warning",
+      detail: health?.error || "nao foi possivel consultar os indices"
+    };
+  }
   const hasSummary = health && (
     health.checkedAt
     || health.collectedAt
@@ -969,7 +1114,7 @@ function indexHealthStatus(client) {
     return { label: "Indices OK", shortLabel: "OK", tone: "online", detail: `${active} / ${total} ativos` };
   }
   if (hasSummary) {
-    return { label: "Indices OK", shortLabel: "OK", tone: "online", detail: `${active} ativo(s)` };
+    return { label: "Indices nao verificados", shortLabel: "Sem leitura", tone: "warning", detail: `${active} ativo(s)` };
   }
   return { label: "Nao informado", shortLabel: "Sem leitura", tone: "unknown", detail: "sem leitura do TronFire" };
 }
@@ -1441,7 +1586,7 @@ function renderGeoMap() {
   const list = document.querySelector("#geo-list");
   const groups = new Map();
 
-  currentClients.forEach((client) => {
+  currentClients.filter((client) => client.installation).forEach((client) => {
     const { city, state } = clientLocation(client);
     if (!state || !stateCoordinates[state]) return;
     const key = `${state}|${city || "Sem cidade"}`;
@@ -1487,7 +1632,7 @@ function renderGeoMap() {
       L.marker(coordinates, { icon })
         .bindPopup(`
           <strong>${escapeHtml(point.city)} / ${escapeHtml(point.state)}</strong><br>
-          ${point.count} cliente(s)<br>
+          ${point.count} servidor(es)<br>
           ${point.online} online, ${point.warning} em atencao
         `)
         .addTo(geoLeafletLayer);
@@ -1506,10 +1651,10 @@ function renderGeoMap() {
     .map((point) => `
       <article class="geo-item">
         <strong>${escapeHtml(point.city)} / ${escapeHtml(point.state)}</strong>
-        <span>${point.count} cliente(s), ${point.online} online, ${point.warning} em atencao</span>
+        <span>${point.count} servidor(es), ${point.online} online, ${point.warning} em atencao</span>
       </article>
     `)
-    .join("") || `<p class="empty-note">Cadastre clientes com cidade e UF para popular o mapa.</p>`;
+    .join("") || `<p class="empty-note">Cadastre cidade/UF e pareie ambientes para popular o mapa.</p>`;
 }
 
 function applyTheme(theme) {

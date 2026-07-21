@@ -84,6 +84,7 @@ function compactDatabase(database = {}) {
       previousMaxSizeBytes: health.previousMaxSizeBytes,
       previousMaxCollectedAt: health.previousMaxCollectedAt,
       sizeDropPercent: health.sizeDropPercent,
+      error: health.error,
       missingActiveTables: Array.isArray(health.missingActiveTables) ? health.missingActiveTables.slice(0, 50) : []
     };
   }
