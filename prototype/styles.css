@@ -741,6 +741,52 @@ p {
   background: #e9eef3;
 }
 
+.temperature-detail {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: center;
+  margin-top: 10px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ops-chart);
+}
+
+.temperature-detail span {
+  color: var(--ops-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.temperature-detail strong {
+  justify-self: end;
+  font-size: 20px;
+  color: var(--ops-text);
+}
+
+.temperature-detail small {
+  grid-column: 1 / -1;
+  color: var(--ops-muted);
+}
+
+.temperature-detail.online {
+  border-left: 4px solid #39c87a;
+}
+
+.temperature-detail.warning {
+  border-left: 4px solid #e1a23a;
+}
+
+.temperature-detail.offline {
+  border-left: 4px solid #ef6b6b;
+}
+
+.temperature-detail.unknown {
+  border-left: 4px solid #6f8494;
+}
+
 .client-avatar {
   display: grid;
   flex: 0 0 auto;

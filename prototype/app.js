@@ -780,10 +780,38 @@ function temperatureValue(client) {
   const latest = Array.isArray(system.latest) ? system.latest[0] : system.latest;
   const latestSeries = Array.isArray(system.series) ? system.series.at(-1) : null;
   const value = latest?.temperatureCelsius
+    ?? latest?.temperature
+    ?? latest?.temperatureC
+    ?? latest?.tempCelsius
+    ?? latest?.cpuTemperature
+    ?? latest?.cpuTempCelsius
     ?? latestSeries?.temperatureCelsius
+    ?? latestSeries?.temperature
+    ?? latestSeries?.temperatureC
+    ?? latestSeries?.tempCelsius
+    ?? latestSeries?.cpuTemperature
+    ?? latestSeries?.cpuTempCelsius
     ?? system.temperatureCelsius
+    ?? system.temperature
+    ?? system.temperatureC
+    ?? system.tempCelsius
+    ?? system.cpuTemperature
+    ?? system.cpuTempCelsius
+    ?? system.host?.temperature
     ?? metrics.temperatureCelsius
+    ?? metrics.temperature
+    ?? metrics.temperatureC
+    ?? metrics.tempCelsius
+    ?? metrics.cpuTemperature
+    ?? metrics.cpuTempCelsius
     ?? metrics.host?.temperatureCelsius
+    ?? metrics.host?.temperature
+    ?? metrics.host?.temperatureC
+    ?? metrics.host?.tempCelsius
+    ?? client?.host?.temperatureCelsius
+    ?? client?.host?.temperature
+    ?? client?.host?.temperatureC
+    ?? client?.host?.tempCelsius
     ?? null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -1013,7 +1041,6 @@ function renderEnvironments() {
         ? `<span class="status online">Pareado</span><br><span class="muted-cell">${escapeHtml(client.installation?.installationId || "")}</span>`
         : `<span class="status unknown">Pendente</span>${client.pairingToken ? `<br>${renderTokenCopy(client.pairingToken)}` : ""}`;
       const database = paired ? databaseVersion(client.installation) : "-";
-      const temperature = paired ? temperatureStatus(client) : { label: "-", tone: "unknown", detail: "aguardando" };
       const lastSeen = paired ? formatDateTime(client.lastSeenAt) : formatDateTime(client.pairingTokenInfo?.createdAt || client.rawClient?.createdAt);
       return `
         <tr class="clickable-row" data-client-detail="${escapeHtml(client.detailId)}">
@@ -1024,7 +1051,6 @@ function renderEnvironments() {
           <td><span class="index-pill ${hasHa ? "online" : "unknown"}">${hasHa ? "Com HA" : "Sem HA"}</span></td>
           <td>${escapeHtml(client.environment || "Ambiente principal")}</td>
           <td><span class="status ${escapeHtml(status)}">${escapeHtml(paired ? (statusLabels[status] || status) : "Pendente")}</span></td>
-          <td><span class="temperature-pill ${escapeHtml(temperature.tone)}">${escapeHtml(temperature.label)}</span><br><span class="muted-cell">${escapeHtml(temperature.detail)}</span></td>
           <td>${escapeHtml(database || "-")}</td>
           <td>${escapeHtml(lastSeen)}</td>
         </tr>
@@ -1032,7 +1058,7 @@ function renderEnvironments() {
     })
     .join("") || `
       <tr>
-        <td colspan="10" class="empty-cell">Nenhum ambiente encontrado neste filtro.</td>
+        <td colspan="9" class="empty-cell">Nenhum ambiente encontrado neste filtro.</td>
       </tr>
     `;
 
@@ -1196,6 +1222,17 @@ function detailMetric(title, value, tone = "neutral", caption = "") {
       <strong>${escapeHtml(valueOrDash(value))}</strong>
       <small>${escapeHtml(caption)}</small>
     </article>
+  `;
+}
+
+function detailTemperature(client) {
+  const temperature = temperatureStatus(client);
+  return `
+    <div class="temperature-detail ${escapeHtml(temperature.tone)}">
+      <span>Temperatura</span>
+      <strong>${escapeHtml(temperature.label === "-" ? "Sem sensor" : temperature.label)}</strong>
+      <small>${escapeHtml(temperature.detail)}</small>
+    </div>
   `;
 }
 
@@ -1430,6 +1467,7 @@ function renderClientDetail(client) {
         ${metricBars(cpuSeries, "warning")}
         <div class="metric-chart-label">Memoria</div>
         ${metricBars(memorySeries, "online")}
+        ${detailTemperature(client)}
       </article>
 
       <article class="ops-panel">

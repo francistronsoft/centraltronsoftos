@@ -632,7 +632,34 @@ function latestSystemMetricRow(payload = {}, metrics = {}) {
   const cpuPercent = row.cpuPercent ?? systemMetrics.cpuPercent ?? metrics.cpuPercent ?? systemMetrics.cpu?.percent;
   const memoryPercent = row.memoryPercent ?? systemMetrics.memoryPercent ?? metrics.memoryPercent ?? systemMetrics.memory?.usedPercent;
   const diskUsedPercent = row.diskUsedPercent ?? systemMetrics.diskUsedPercent ?? metrics.diskUsedPercent ?? systemMetrics.disk?.percentUsed;
-  const temperatureCelsius = row.temperatureCelsius ?? systemMetrics.temperatureCelsius ?? metrics.temperatureCelsius ?? systemMetrics.host?.temperatureCelsius;
+  const temperatureCelsius = row.temperatureCelsius
+    ?? row.temperature
+    ?? row.temperatureC
+    ?? row.tempCelsius
+    ?? row.cpuTemperature
+    ?? row.cpuTempCelsius
+    ?? systemMetrics.temperatureCelsius
+    ?? systemMetrics.temperature
+    ?? systemMetrics.temperatureC
+    ?? systemMetrics.tempCelsius
+    ?? systemMetrics.cpuTemperature
+    ?? systemMetrics.cpuTempCelsius
+    ?? metrics.temperatureCelsius
+    ?? metrics.temperature
+    ?? metrics.temperatureC
+    ?? metrics.tempCelsius
+    ?? metrics.cpuTemperature
+    ?? metrics.cpuTempCelsius
+    ?? systemMetrics.host?.temperatureCelsius
+    ?? systemMetrics.host?.temperature
+    ?? metrics.host?.temperatureCelsius
+    ?? metrics.host?.temperature
+    ?? metrics.host?.temperatureC
+    ?? metrics.host?.tempCelsius
+    ?? payload.host?.temperatureCelsius
+    ?? payload.host?.temperature
+    ?? payload.host?.temperatureC
+    ?? payload.host?.tempCelsius;
   const hostUptimeSeconds = row.hostUptimeSeconds ?? systemMetrics.hostUptimeSeconds ?? metrics.hostUptimeSeconds ?? payload.host?.uptimeSeconds;
   const normalized = { collectedAt };
   if (Number.isFinite(Number(cpuPercent))) normalized.cpuPercent = Number(cpuPercent);
