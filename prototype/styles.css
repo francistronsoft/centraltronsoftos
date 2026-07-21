@@ -1584,21 +1584,25 @@ td {
 }
 
 .token-cell {
-  display: inline-block;
-  max-width: 240px;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--brand-strong);
   font-family: Consolas, "Courier New", monospace;
   font-size: 12px;
   text-overflow: ellipsis;
+  white-space: nowrap;
   vertical-align: bottom;
 }
 
 .token-copy-wrap {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+  max-width: min(100%, 360px);
 }
 
 .token-copy-button {
@@ -1758,6 +1762,7 @@ tr:last-child td {
 }
 
 .event {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 12px;
@@ -1780,6 +1785,25 @@ tr:last-child td {
   color: var(--muted);
   font-size: 13px;
   margin-top: 4px;
+}
+
+.event-summary,
+.event-detail {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.event-more-button {
+  display: inline-flex;
+  width: fit-content;
+  border: 0;
+  padding: 4px 0 0;
+  color: var(--brand-strong);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 @media (max-width: 980px) {

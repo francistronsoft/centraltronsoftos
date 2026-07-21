@@ -158,6 +158,17 @@ function backupAgeLabel(minutes) {
   return `ha ${hours} h ${rest} min`;
 }
 
+function compactText(value, max = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trim()}...`;
+}
+
+function renderTokenCopy(token) {
+  if (!token) return "";
+  return `<span class="token-copy-wrap"><span class="token-cell" title="${escapeHtml(token)}">${escapeHtml(token)}</span><button class="token-copy-button" type="button" data-copy-token="${escapeHtml(token)}" title="Copiar token">Copiar</button></span>`;
+}
+
 function numberFromPaths(source, paths) {
   for (const path of paths) {
     const value = path.split(".").reduce((acc, key) => acc?.[key], source);
@@ -536,11 +547,15 @@ async function loadCentralData() {
       }));
     });
 
-    currentAuthEvents = alerts.slice(-12).reverse().map((alert) => ({
+    currentAuthEvents = alerts.slice(-12).reverse().map((alert) => {
+      const detail = `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`;
+      return {
       title: alert.title,
-      detail: `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`,
+      detail,
+      summary: compactText(detail, 120),
       occurredAt: alert.openedAt || alert.receivedAt || alert.createdAt || alert.resolvedAt || null
-    }));
+      };
+    });
 
     renderMetrics(dashboard);
     renderOperationalDashboard();
@@ -829,7 +844,7 @@ function renderClients(filter = "") {
       const location = [client.city, client.state].filter(Boolean).join(" / ") || "-";
       const indexStatus = indexHealthStatus(client);
       const pairingToken = client.pairingToken
-        ? `<br><span class="token-copy-wrap"><span class="token-cell">${escapeHtml(client.pairingToken)}</span><button class="token-copy-button" type="button" data-copy-token="${escapeHtml(client.pairingToken)}" title="Copiar token">Copiar</button></span>`
+        ? `<br>${renderTokenCopy(client.pairingToken)}`
         : "";
       return `
         <tr class="clickable-row" data-client-detail="${escapeHtml(client.detailId)}">
@@ -897,7 +912,7 @@ function renderDashboardClients() {
       const document = client.rawClient?.document || "-";
       const createdAt = client.pairingTokenInfo?.createdAt || client.rawClient?.createdAt || null;
       const token = client.pairingToken
-        ? `<span class="token-copy-wrap"><span class="token-cell">${escapeHtml(client.pairingToken)}</span><button class="token-copy-button" type="button" data-copy-token="${escapeHtml(client.pairingToken)}" title="Copiar token">Copiar</button></span>`
+        ? renderTokenCopy(client.pairingToken)
         : `<span class="muted-cell">sem token</span>`;
       return `
         <article class="monitor-row clickable-row" data-client-detail="${escapeHtml(client.detailId)}">
@@ -972,7 +987,7 @@ function renderEnvironments() {
       const documentValue = client.rawClient?.document || "-";
       const pairing = paired
         ? `<span class="status online">Pareado</span><br><span class="muted-cell">${escapeHtml(client.installation?.installationId || "")}</span>`
-        : `<span class="status unknown">Pendente</span>${client.pairingToken ? `<br><span class="token-copy-wrap"><span class="token-cell">${escapeHtml(client.pairingToken)}</span><button class="token-copy-button" type="button" data-copy-token="${escapeHtml(client.pairingToken)}" title="Copiar token">Copiar</button></span>` : ""}`;
+        : `<span class="status unknown">Pendente</span>${client.pairingToken ? `<br>${renderTokenCopy(client.pairingToken)}` : ""}`;
       const database = paired ? databaseVersion(client.installation) : "-";
       const lastSeen = paired ? formatDateTime(client.lastSeenAt) : formatDateTime(client.pairingTokenInfo?.createdAt || client.rawClient?.createdAt);
       return `
@@ -1717,19 +1732,32 @@ function renderAuthEvents() {
   const list = document.querySelector("#auth-events");
   const events = currentAuthEvents.length > 0
     ? currentAuthEvents
-    : [{ title: "Sem eventos", detail: "Nenhum alerta recente no escopo atual", occurredAt: null }];
+    : [{ title: "Sem eventos", detail: "Nenhum alerta recente no escopo atual", summary: "Nenhum alerta recente no escopo atual", occurredAt: null }];
 
   list.innerHTML = events
     .map(
-      (event) => `
+      (event, index) => {
+        const hasMore = String(event.detail || "").length > String(event.summary || event.detail || "").length;
+        return `
         <article class="event">
           <strong>${event.title}</strong>
           ${event.occurredAt ? `<small>${escapeHtml(formatDateTime(event.occurredAt))}</small>` : ""}
-          <span>${event.detail}</span>
+          <span class="event-summary">${escapeHtml(event.summary || event.detail)}</span>
+          ${hasMore ? `<button class="event-more-button" type="button" data-event-more="${index}">Ver mais</button><span class="event-detail" hidden>${escapeHtml(event.detail)}</span>` : ""}
         </article>
-      `
+      `;
+      }
     )
     .join("");
+  list.querySelectorAll("[data-event-more]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const detail = button.parentElement?.querySelector(".event-detail");
+      if (!detail) return;
+      const expanded = !detail.hidden;
+      detail.hidden = expanded;
+      button.textContent = expanded ? "Ver mais" : "Ver menos";
+    });
+  });
 }
 
 async function createClient(event) {
