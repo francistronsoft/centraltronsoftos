@@ -151,6 +151,15 @@ function clientKey(customer) {
   return customer?.document || toSlug(customer?.name);
 }
 
+function normalizeDocument(value, field = "document") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw !== raw.replace(/\D/g, "")) {
+    throw httpError(400, `Campo ${field} deve conter apenas numeros.`);
+  }
+  return raw;
+}
+
 function generatePairingToken() {
   return `cts_${randomUUID().replace(/-/g, "")}`;
 }
@@ -195,7 +204,7 @@ function sendJson(response, status, payload) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
     "access-control-allow-headers": "content-type, x-installation-token",
     "access-control-allow-credentials": "true"
   });
@@ -450,8 +459,8 @@ function userPasswordEmail(user, password) {
 
 function findOrCreateClient(db, reseller, customerPayload) {
   const customerName = requireText(customerPayload?.name, "customer.name");
-  const document = String(customerPayload?.document || "").trim();
-  const key = clientKey(customerPayload);
+  const document = normalizeDocument(customerPayload?.document, "customer.document");
+  const key = clientKey({ name: customerName, document });
   const existing = db.clients.find((client) => {
     if (client.resellerId !== reseller.id) return false;
     if (document && client.document === document) return true;
@@ -763,6 +772,14 @@ function publicPairingToken(token) {
   };
 }
 
+function publicClient(db, client) {
+  return {
+    ...client,
+    reseller: db.resellers.find((reseller) => reseller.id === client.resellerId) || null,
+    pairingTokens: db.pairingTokens.filter((token) => token.clientId === client.id).map(publicPairingToken)
+  };
+}
+
 function publicInstallation(db, installation) {
   const client = db.clients.find((item) => item.id === installation.clientId);
   const reseller = db.resellers.find((item) => item.id === client?.resellerId);
@@ -1015,6 +1032,44 @@ async function handleCreateClient(request, response) {
     reseller,
     client,
     pairingToken: publicPairingToken(token)
+  });
+}
+
+async function handleUpdateClient(request, response, clientId) {
+  const payload = await readJson(request);
+  const db = await readDbWithBootstrap();
+  const user = requireUser(db, request);
+  const client = db.clients.find((item) => item.id === clientId);
+
+  if (!client) {
+    throw httpError(404, "Cliente nao encontrado.");
+  }
+
+  if (user.role === resellerRole && client.resellerId !== user.resellerId) {
+    throw httpError(403, "Cliente fora do escopo da revenda.");
+  }
+
+  const name = requireText(payload.name, "name");
+  const document = normalizeDocument(payload.document, "document");
+  if (document) {
+    const duplicated = db.clients.find((item) => {
+      return item.id !== client.id
+        && item.resellerId === client.resellerId
+        && String(item.document || "").trim().toLowerCase() === document.toLowerCase();
+    });
+    if (duplicated) {
+      throw httpError(409, "Ja existe cliente com este documento nesta revenda.");
+    }
+  }
+
+  client.name = name;
+  client.document = document;
+  client.key = clientKey({ name, document });
+  client.updatedAt = nowIso();
+
+  await writeDb(db);
+  sendJson(response, 200, {
+    client: publicClient(db, client)
   });
 }
 
@@ -1436,6 +1491,12 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  const clientUpdateMatch = pathname.match(/^\/api\/clients\/([^/]+)$/);
+  if (request.method === "PATCH" && clientUpdateMatch) {
+    await handleUpdateClient(request, response, clientUpdateMatch[1]);
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/admin/resellers") {
     await handleCreateReseller(request, response);
     return;
@@ -1551,11 +1612,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname === "/api/clients") {
-    sendJson(response, 200, scopedClients(db, user, resellerId).map((client) => ({
-      ...client,
-      reseller: db.resellers.find((reseller) => reseller.id === client.resellerId) || null,
-      pairingTokens: db.pairingTokens.filter((token) => token.clientId === client.id).map(publicPairingToken)
-    })));
+    sendJson(response, 200, scopedClients(db, user, resellerId).map((client) => publicClient(db, client)));
     return;
   }
 

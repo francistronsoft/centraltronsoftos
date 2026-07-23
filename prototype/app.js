@@ -264,6 +264,10 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 async function copyTextToClipboard(value) {
   const text = String(value || "");
   if (!text) return false;
@@ -1054,16 +1058,23 @@ function renderEnvironments() {
           <td><span class="status ${escapeHtml(status)}">${escapeHtml(paired ? (statusLabels[status] || status) : "Pendente")}</span></td>
           <td>${escapeHtml(database || "-")}</td>
           <td>${escapeHtml(lastSeen)}</td>
+          <td><button class="secondary-button compact-action" type="button" data-edit-environment-client="${escapeHtml(client.id)}">Editar</button></td>
         </tr>
       `;
     })
     .join("") || `
       <tr>
-        <td colspan="9" class="empty-cell">Nenhum ambiente encontrado neste filtro.</td>
+        <td colspan="10" class="empty-cell">Nenhum ambiente encontrado neste filtro.</td>
       </tr>
     `;
 
   renderEnvironmentPagination(visible.length, totalPages);
+  table.querySelectorAll("[data-edit-environment-client]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      editEnvironmentClient(button.dataset.editEnvironmentClient);
+    });
+  });
   table.querySelectorAll("[data-client-detail]").forEach((row) => {
     row.addEventListener("click", () => openClientDetail(row.dataset.clientDetail, "environments"));
   });
@@ -1090,6 +1101,45 @@ function renderEnvironmentPagination(total, totalPages) {
       renderEnvironments();
     });
   });
+}
+
+async function editEnvironmentClient(clientId) {
+  const client = currentClients.find((item) => item.id === clientId);
+  if (!client?.rawClient) {
+    alert("Cliente nao encontrado na lista atual.");
+    return;
+  }
+
+  const currentName = client.rawClient.name || client.name || "";
+  const currentDocument = client.rawClient.document || "";
+  const name = prompt("Nome do cliente", currentName);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    alert("Informe o nome do cliente.");
+    return;
+  }
+
+  const documentValue = prompt("CNPJ / Documento do cliente (apenas numeros)", currentDocument);
+  if (documentValue === null) return;
+  const trimmedDocument = documentValue.trim();
+  if (trimmedDocument && trimmedDocument !== digitsOnly(trimmedDocument)) {
+    alert("O documento deve conter apenas numeros.");
+    return;
+  }
+
+  try {
+    await api(`/api/clients/${encodeURIComponent(client.rawClient.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: trimmedName,
+        document: trimmedDocument
+      })
+    });
+    await loadCentralData();
+  } catch (error) {
+    alert(error.message || "Nao foi possivel atualizar o cliente.");
+  }
 }
 
 function valueOrDash(value) {
@@ -1937,11 +1987,11 @@ async function createClient(event) {
             }
           : {
               name: data.get("resellerName"),
-              document: data.get("resellerDocument")
+              document: digitsOnly(data.get("resellerDocument"))
             },
         customer: {
           name: data.get("customerName"),
-          document: data.get("customerDocument"),
+          document: digitsOnly(data.get("customerDocument")),
           city: location.city,
           state: location.state
         }
@@ -2191,6 +2241,11 @@ document.querySelector("#client-filter")?.addEventListener("input", (event) => {
   });
 });
 document.querySelector("#client-form").addEventListener("submit", createClient);
+document.querySelectorAll("#client-form input[name='customerDocument'], #client-form input[name='resellerDocument']").forEach((input) => {
+  input.addEventListener("input", () => {
+    input.value = digitsOnly(input.value);
+  });
+});
 document.querySelector("#reseller-form").addEventListener("submit", createReseller);
 document.querySelector("#user-form").addEventListener("submit", createUser);
 document.querySelector("#user-role-select").addEventListener("change", updateUserRoleFields);

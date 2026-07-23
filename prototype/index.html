@@ -251,9 +251,9 @@
             <form id="client-form" class="client-form">
               <select name="resellerId" id="client-reseller-select" hidden></select>
               <input name="resellerName" id="reseller-name-input" type="text" placeholder="Revenda" required>
-              <input name="resellerDocument" id="reseller-document-input" type="text" placeholder="Documento da revenda">
+              <input name="resellerDocument" id="reseller-document-input" type="text" placeholder="Documento da revenda" inputmode="numeric" pattern="[0-9]*">
               <input name="customerName" type="text" placeholder="Cliente" required>
-              <input name="customerDocument" type="text" placeholder="Documento do cliente">
+              <input name="customerDocument" type="text" placeholder="Documento do cliente" inputmode="numeric" pattern="[0-9]*">
               <input name="customerCity" type="text" placeholder="Cidade" list="city-options">
               <datalist id="city-options"></datalist>
               <button class="primary-button" type="submit">Gerar token</button>
@@ -296,6 +296,7 @@
                     <th>Status</th>
                     <th>Banco</th>
                     <th>Ultima comunicacao</th>
+                    <th>Acoes</th>
                   </tr>
                 </thead>
                 <tbody id="environments-table"></tbody>
