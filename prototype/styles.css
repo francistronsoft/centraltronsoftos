@@ -302,6 +302,105 @@ p {
   font-weight: 700;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.modal-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.modal-form {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.modal-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modal-form input,
+.modal-form select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.modal-form select:disabled {
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.modal-note {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 13px;
+}
+
+.modal-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.danger-button {
+  color: var(--danger);
+  border-color: #f2b8b8;
+  background: #fff5f5;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -1898,6 +1997,11 @@ tr:last-child td {
 }
 
 .status.unknown {
+  color: var(--muted);
+  background: var(--surface-strong);
+}
+
+.status.inactive {
   color: var(--muted);
   background: var(--surface-strong);
 }

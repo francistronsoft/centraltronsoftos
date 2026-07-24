@@ -6,7 +6,7 @@
     <title>Central TronSoftOS</title>
     <link rel="icon" href="favicon.svg?v=central-c" type="image/svg+xml">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=20260720-environments-inventory">
+    <link rel="stylesheet" href="styles.css?v=20260724-client-edit-modal">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -376,7 +376,49 @@
       </main>
     </div>
 
+    <div id="client-edit-modal" class="modal-backdrop" hidden>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="client-edit-title">
+        <div class="modal-header">
+          <div>
+            <h2 id="client-edit-title">Editar cliente</h2>
+            <p>Atualize o cadastro sem alterar o token ou o pareamento existente.</p>
+          </div>
+          <button id="client-edit-close" class="icon-button" type="button" aria-label="Fechar">x</button>
+        </div>
+        <form id="client-edit-form" class="modal-form">
+          <input name="clientId" type="hidden">
+          <input name="installationId" type="hidden">
+          <label>
+            <span>Nome do cliente</span>
+            <input name="name" type="text" required>
+          </label>
+          <label>
+            <span>CNPJ / Documento</span>
+            <input name="document" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="apenas numeros">
+          </label>
+          <label>
+            <span>Revenda</span>
+            <select name="resellerId" id="client-edit-reseller"></select>
+          </label>
+          <div class="modal-note">
+            O token gerado e o ambiente pareado continuam vinculados ao mesmo cliente.
+          </div>
+          <div id="client-edit-error" class="form-error"></div>
+          <div class="modal-quick-actions" aria-label="Acoes do cliente e ambiente">
+            <button id="client-edit-status" class="secondary-button" type="button">Desativar cliente</button>
+            <button id="client-edit-token" class="secondary-button" type="button">Resetar token</button>
+            <button id="client-edit-unpair" class="secondary-button" type="button">Desvincular pareamento</button>
+            <button id="client-edit-delete" class="secondary-button danger-button" type="button">Excluir</button>
+          </div>
+          <div class="modal-actions">
+            <button id="client-edit-cancel" class="secondary-button" type="button">Cancelar</button>
+            <button class="primary-button" type="submit">Salvar alteracoes</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260720-environments-inventory"></script>
+    <script src="app.js?v=20260724-client-edit-modal"></script>
   </body>
 </html>

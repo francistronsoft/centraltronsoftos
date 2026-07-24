@@ -2,7 +2,8 @@ const statusLabels = {
   online: "Online",
   warning: "Atencao",
   offline: "Offline",
-  unknown: "Desconhecido"
+  unknown: "Desconhecido",
+  inactive: "Inativo"
 };
 
 let currentUser = null;
@@ -512,7 +513,7 @@ async function loadCentralData() {
           backups: {},
           metrics: {},
           cluster: {},
-          status: "unknown",
+          status: client.status === "inactive" ? "inactive" : "unknown",
           lastSeen: "-",
           lastSeenAt: null,
           diskPercent: null,
@@ -541,7 +542,7 @@ async function loadCentralData() {
         googleDrive: installation.googleDrive || null,
         metrics: installation.metrics || {},
         cluster: installation.cluster || {},
-        status: installation.status,
+        status: client.status === "inactive" ? "inactive" : installation.status,
         lastSeen: formatDateTime(installation.lastSeenAt),
         lastSeenAt: installation.lastSeenAt || null,
         diskPercent: diskPercent(installation),
@@ -658,8 +659,9 @@ function environmentPlatform(client) {
 }
 
 function dashboardSummary() {
-  const monitored = currentClients.filter((client) => client.installation);
-  const openAlerts = currentAlerts.filter((alert) => alert.status !== "resolved");
+  const monitored = currentClients.filter((client) => client.installation && client.rawClient?.status !== "inactive");
+  const activeInstallationIds = new Set(monitored.map((client) => client.installation?.installationId).filter(Boolean));
+  const openAlerts = currentAlerts.filter((alert) => activeInstallationIds.has(alert.installationId) && alert.status !== "resolved");
   const criticalAlerts = openAlerts.filter((alert) => alert.severity === "critical");
   const windows = monitored.filter((client) => environmentPlatform(client) === "windows").length;
   const linux = monitored.filter((client) => environmentPlatform(client) === "linux").length;
@@ -953,7 +955,7 @@ function renderDashboardClients() {
   const list = document.querySelector("#dashboard-clients-list");
   if (!list) return;
   const visibleClients = currentClients
-    .filter((client) => !client.installation)
+    .filter((client) => !client.installation && client.rawClient?.status !== "inactive")
     .filter((client) => {
       const hasToken = Boolean(client.pairingToken);
       if (monitorFilter === "token") return hasToken;
@@ -1040,7 +1042,7 @@ function renderEnvironments() {
     .map((client) => {
       const paired = Boolean(client.installation);
       const hasHa = environmentHaStatus(client);
-      const status = paired ? monitorStatus(client) : "unknown";
+      const status = client.rawClient?.status === "inactive" ? "inactive" : (paired ? monitorStatus(client) : "unknown");
       const documentValue = client.rawClient?.document || "-";
       const pairing = paired
         ? `<span class="status online">Pareado</span><br><span class="muted-cell">${escapeHtml(client.installation?.installationId || "")}</span>`
@@ -1055,7 +1057,7 @@ function renderEnvironments() {
           <td>${pairing}</td>
           <td><span class="index-pill ${hasHa ? "online" : "unknown"}">${hasHa ? "Com HA" : "Sem HA"}</span></td>
           <td>${escapeHtml(client.environment || "Ambiente principal")}</td>
-          <td><span class="status ${escapeHtml(status)}">${escapeHtml(paired ? (statusLabels[status] || status) : "Pendente")}</span></td>
+          <td><span class="status ${escapeHtml(status)}">${escapeHtml(status === "inactive" ? "Inativo" : (paired ? (statusLabels[status] || status) : "Pendente"))}</span></td>
           <td>${escapeHtml(database || "-")}</td>
           <td>${escapeHtml(lastSeen)}</td>
           <td><button class="secondary-button compact-action" type="button" data-edit-environment-client="${escapeHtml(client.id)}">Editar</button></td>
@@ -1110,35 +1112,156 @@ async function editEnvironmentClient(clientId) {
     return;
   }
 
-  const currentName = client.rawClient.name || client.name || "";
-  const currentDocument = client.rawClient.document || "";
-  const name = prompt("Nome do cliente", currentName);
-  if (name === null) return;
-  const trimmedName = name.trim();
-  if (!trimmedName) {
-    alert("Informe o nome do cliente.");
+  openClientEditModal(client);
+}
+
+function resellerOptionsForEdit() {
+  return [...currentResellers];
+}
+
+function openClientEditModal(client) {
+  const modal = document.querySelector("#client-edit-modal");
+  const form = document.querySelector("#client-edit-form");
+  const resellerSelect = document.querySelector("#client-edit-reseller");
+  const error = document.querySelector("#client-edit-error");
+  if (!modal || !form || !resellerSelect) return;
+
+  const rawClient = client.rawClient;
+  const tronsoft = currentUser?.role === "tronsoft_admin";
+  const isInactive = rawClient.status === "inactive";
+  const options = resellerOptionsForEdit();
+  resellerSelect.innerHTML = options
+    .map((reseller) => `<option value="${escapeHtml(reseller.id)}">${escapeHtml(reseller.name)}</option>`)
+    .join("");
+
+  form.elements.clientId.value = rawClient.id;
+  form.elements.installationId.value = client.installation?.installationId || "";
+  form.elements.name.value = rawClient.name || client.name || "";
+  form.elements.document.value = rawClient.document || "";
+  resellerSelect.value = rawClient.resellerId || client.installation?.reseller?.id || "";
+  resellerSelect.disabled = !tronsoft;
+  if (!tronsoft && !resellerSelect.value && currentResellers[0]) {
+    resellerSelect.value = currentResellers[0].id;
+  }
+  const statusButton = document.querySelector("#client-edit-status");
+  const unpairButton = document.querySelector("#client-edit-unpair");
+  const deleteButton = document.querySelector("#client-edit-delete");
+  if (statusButton) {
+    statusButton.textContent = isInactive ? "Ativar cliente" : "Desativar cliente";
+    statusButton.dataset.nextStatus = isInactive ? "active" : "inactive";
+  }
+  if (unpairButton) {
+    unpairButton.disabled = !form.elements.installationId.value;
+    unpairButton.title = form.elements.installationId.value ? "" : "Cliente sem ambiente pareado.";
+  }
+  if (deleteButton) {
+    deleteButton.hidden = !tronsoft;
+  }
+  if (error) error.textContent = "";
+  modal.hidden = false;
+  form.elements.name.focus();
+}
+
+function closeClientEditModal() {
+  const modal = document.querySelector("#client-edit-modal");
+  const form = document.querySelector("#client-edit-form");
+  const error = document.querySelector("#client-edit-error");
+  if (form) form.reset();
+  if (error) error.textContent = "";
+  if (modal) modal.hidden = true;
+}
+
+async function saveClientEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const error = document.querySelector("#client-edit-error");
+  const clientId = form.elements.clientId.value;
+  const name = form.elements.name.value.trim();
+  const documentValue = form.elements.document.value.trim();
+  const resellerId = form.elements.resellerId.value;
+
+  if (error) error.textContent = "";
+  if (!name) {
+    if (error) error.textContent = "Informe o nome do cliente.";
     return;
   }
-
-  const documentValue = prompt("CNPJ / Documento do cliente (apenas numeros)", currentDocument);
-  if (documentValue === null) return;
-  const trimmedDocument = documentValue.trim();
-  if (trimmedDocument && trimmedDocument !== digitsOnly(trimmedDocument)) {
-    alert("O documento deve conter apenas numeros.");
+  if (documentValue && documentValue !== digitsOnly(documentValue)) {
+    if (error) error.textContent = "O documento deve conter apenas numeros.";
     return;
   }
 
   try {
-    await api(`/api/clients/${encodeURIComponent(client.rawClient.id)}`, {
+    await api(`/api/clients/${encodeURIComponent(clientId)}`, {
       method: "PATCH",
       body: JSON.stringify({
-        name: trimmedName,
-        document: trimmedDocument
+        name,
+        document: documentValue,
+        resellerId
       })
     });
+    closeClientEditModal();
     await loadCentralData();
-  } catch (error) {
-    alert(error.message || "Nao foi possivel atualizar o cliente.");
+  } catch (err) {
+    const message = err.message || "Nao foi possivel atualizar o cliente.";
+    const target = document.querySelector("#client-edit-error");
+    if (target) target.textContent = message;
+    else alert(message);
+  }
+}
+
+function currentEditingClient() {
+  const form = document.querySelector("#client-edit-form");
+  const clientId = form?.elements.clientId.value || "";
+  return currentClients.find((client) => client.rawClient?.id === clientId) || null;
+}
+
+async function runClientModalAction(action) {
+  const form = document.querySelector("#client-edit-form");
+  const error = document.querySelector("#client-edit-error");
+  const clientId = form?.elements.clientId.value || "";
+  const installationId = form?.elements.installationId.value || "";
+  if (error) error.textContent = "";
+  if (!clientId) return;
+
+  try {
+    if (action === "status") {
+      const nextStatus = document.querySelector("#client-edit-status")?.dataset.nextStatus || "inactive";
+      const label = nextStatus === "inactive" ? "desativar" : "ativar";
+      if (!confirm(`Confirma ${label} este cliente?`)) return;
+      await api(`/api/clients/${encodeURIComponent(clientId)}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: nextStatus })
+      });
+    } else if (action === "token") {
+      if (!confirm("Gerar novo token e revogar tokens ativos anteriores deste cliente?")) return;
+      const payload = await api(`/api/clients/${encodeURIComponent(clientId)}/token`, {
+        method: "POST",
+        body: "{}"
+      });
+      alert(`Novo token gerado: ${payload.pairingToken?.token || ""}`);
+    } else if (action === "unpair") {
+      if (!installationId) {
+        if (error) error.textContent = "Este cliente nao possui ambiente pareado para desvincular.";
+        return;
+      }
+      if (!confirm("Desvincular este ambiente do cliente? O ambiente, alertas e eventos ligados a ele serao removidos da Central.")) return;
+      await api(`/api/installations/${encodeURIComponent(installationId)}/unpair`, {
+        method: "POST",
+        body: "{}"
+      });
+    } else if (action === "delete") {
+      const client = currentEditingClient();
+      if (!confirm(`Excluir permanentemente ${client?.name || "este cliente"} da Central? Esta acao remove ambientes, tokens, alertas e eventos vinculados.`)) return;
+      await api(`/api/clients/${encodeURIComponent(clientId)}`, {
+        method: "DELETE"
+      });
+    }
+    closeClientEditModal();
+    await loadCentralData();
+  } catch (err) {
+    const message = err.message || "Nao foi possivel executar a acao.";
+    if (error) error.textContent = message;
+    else alert(message);
   }
 }
 
@@ -2245,6 +2368,19 @@ document.querySelectorAll("#client-form input[name='customerDocument'], #client-
   input.addEventListener("input", () => {
     input.value = digitsOnly(input.value);
   });
+});
+document.querySelector("#client-edit-form").addEventListener("submit", saveClientEdit);
+document.querySelector("#client-edit-close").addEventListener("click", closeClientEditModal);
+document.querySelector("#client-edit-cancel").addEventListener("click", closeClientEditModal);
+document.querySelector("#client-edit-status").addEventListener("click", () => runClientModalAction("status"));
+document.querySelector("#client-edit-token").addEventListener("click", () => runClientModalAction("token"));
+document.querySelector("#client-edit-unpair").addEventListener("click", () => runClientModalAction("unpair"));
+document.querySelector("#client-edit-delete").addEventListener("click", () => runClientModalAction("delete"));
+document.querySelector("#client-edit-modal").addEventListener("click", (event) => {
+  if (event.target.id === "client-edit-modal") closeClientEditModal();
+});
+document.querySelector("#client-edit-form input[name='document']").addEventListener("input", (event) => {
+  event.target.value = digitsOnly(event.target.value);
 });
 document.querySelector("#reseller-form").addEventListener("submit", createReseller);
 document.querySelector("#user-form").addEventListener("submit", createUser);

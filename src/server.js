@@ -204,7 +204,7 @@ function sendJson(response, status, payload) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type, x-installation-token",
     "access-control-allow-credentials": "true"
   });
@@ -356,6 +356,26 @@ function scopedInstallations(db, user, resellerId = "") {
 function scopedAlerts(db, user, resellerId = "") {
   const allowedInstallationIds = new Set(scopedInstallations(db, user, resellerId).map((installation) => installation.installationId));
   return db.alerts.filter((alert) => allowedInstallationIds.has(alert.installationId));
+}
+
+function requireClientAccess(db, user, clientId) {
+  const client = db.clients.find((item) => item.id === clientId);
+  if (!client) {
+    throw httpError(404, "Cliente nao encontrado.");
+  }
+  if (user.role === resellerRole && client.resellerId !== user.resellerId) {
+    throw httpError(403, "Cliente fora do escopo da revenda.");
+  }
+  return client;
+}
+
+function requireInstallationAccess(db, user, installationId) {
+  const installation = db.installations.find((item) => item.installationId === installationId);
+  if (!installation) {
+    throw httpError(404, "Ambiente nao encontrado.");
+  }
+  requireClientAccess(db, user, installation.clientId);
+  return installation;
 }
 
 function requireText(value, field) {
@@ -932,15 +952,18 @@ async function fetchGoogleUserInfo(accessToken) {
 }
 
 function dashboard(db) {
-  const criticalAlerts = db.alerts.filter((alert) => alert.status === "open" && alert.severity === "critical").length;
-  const online = db.installations.filter((installation) => effectiveInstallationStatus(installation) === "online").length;
-  const warning = db.installations.filter((installation) => effectiveInstallationStatus(installation) === "warning").length;
-  const offline = db.installations.filter((installation) => effectiveInstallationStatus(installation) === "offline").length;
+  const activeClientIds = new Set(db.clients.filter((client) => client.status !== "inactive").map((client) => client.id));
+  const activeInstallations = db.installations.filter((installation) => activeClientIds.has(installation.clientId));
+  const activeInstallationIds = new Set(activeInstallations.map((installation) => installation.installationId));
+  const criticalAlerts = db.alerts.filter((alert) => activeInstallationIds.has(alert.installationId) && alert.status === "open" && alert.severity === "critical").length;
+  const online = activeInstallations.filter((installation) => effectiveInstallationStatus(installation) === "online").length;
+  const warning = activeInstallations.filter((installation) => effectiveInstallationStatus(installation) === "warning").length;
+  const offline = activeInstallations.filter((installation) => effectiveInstallationStatus(installation) === "offline").length;
 
   return {
     resellers: db.resellers.length,
-    clients: db.clients.length,
-    installations: db.installations.length,
+    clients: activeClientIds.size,
+    installations: activeInstallations.length,
     online,
     warning,
     offline,
@@ -1039,22 +1062,21 @@ async function handleUpdateClient(request, response, clientId) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
-  const client = db.clients.find((item) => item.id === clientId);
-
-  if (!client) {
-    throw httpError(404, "Cliente nao encontrado.");
-  }
-
-  if (user.role === resellerRole && client.resellerId !== user.resellerId) {
-    throw httpError(403, "Cliente fora do escopo da revenda.");
-  }
+  const client = requireClientAccess(db, user, clientId);
 
   const name = requireText(payload.name, "name");
   const document = normalizeDocument(payload.document, "document");
+  let targetResellerId = client.resellerId;
+  if (user.role === tronsoftRole && payload.resellerId !== undefined) {
+    targetResellerId = requireText(payload.resellerId, "resellerId");
+    if (!db.resellers.some((reseller) => reseller.id === targetResellerId)) {
+      throw httpError(400, "Revenda informada nao encontrada.");
+    }
+  }
   if (document) {
     const duplicated = db.clients.find((item) => {
       return item.id !== client.id
-        && item.resellerId === client.resellerId
+        && item.resellerId === targetResellerId
         && String(item.document || "").trim().toLowerCase() === document.toLowerCase();
     });
     if (duplicated) {
@@ -1064,12 +1086,107 @@ async function handleUpdateClient(request, response, clientId) {
 
   client.name = name;
   client.document = document;
+  client.resellerId = targetResellerId;
   client.key = clientKey({ name, document });
   client.updatedAt = nowIso();
 
   await writeDb(db);
   sendJson(response, 200, {
     client: publicClient(db, client)
+  });
+}
+
+async function handleSetClientStatus(request, response, clientId) {
+  const payload = await readJson(request);
+  const db = await readDbWithBootstrap();
+  const user = requireUser(db, request);
+  const client = requireClientAccess(db, user, clientId);
+  const status = String(payload.status || "").trim().toLowerCase();
+  if (!["active", "inactive"].includes(status)) {
+    throw httpError(400, "Status de cliente invalido.");
+  }
+  client.status = status;
+  client.updatedAt = nowIso();
+  await writeDb(db);
+  sendJson(response, 200, {
+    client: publicClient(db, client)
+  });
+}
+
+async function handleResetClientToken(request, response, clientId) {
+  const db = await readDbWithBootstrap();
+  const user = requireUser(db, request);
+  const client = requireClientAccess(db, user, clientId);
+  const now = nowIso();
+  db.pairingTokens
+    .filter((token) => token.clientId === client.id && token.status === "active")
+    .forEach((token) => {
+      token.status = "revoked";
+      token.revokedAt = token.revokedAt || now;
+    });
+  const token = {
+    id: randomUUID(),
+    clientId: client.id,
+    token: generatePairingToken(),
+    status: "active",
+    createdAt: now,
+    usedAt: null,
+    revokedAt: null,
+    installationId: null
+  };
+  db.pairingTokens.push(token);
+  client.status = "active";
+  client.updatedAt = now;
+  await writeDb(db);
+  sendJson(response, 201, {
+    client: publicClient(db, client),
+    pairingToken: publicPairingToken(token)
+  });
+}
+
+async function handleDeleteClient(request, response, clientId) {
+  const db = await readDbWithBootstrap();
+  const user = requireUser(db, request);
+  requireTronsoft(user);
+  const client = requireClientAccess(db, user, clientId);
+  const installationIds = new Set(db.installations
+    .filter((installation) => installation.clientId === client.id)
+    .map((installation) => installation.installationId));
+  db.clients = db.clients.filter((item) => item.id !== client.id);
+  db.installations = db.installations.filter((installation) => installation.clientId !== client.id);
+  db.pairingTokens = db.pairingTokens.filter((token) => token.clientId !== client.id);
+  db.alerts = db.alerts.filter((alert) => !installationIds.has(alert.installationId));
+  db.events = db.events.filter((event) => !installationIds.has(event.installationId));
+  db.oauthCredentials = db.oauthCredentials.filter((credential) => !installationIds.has(credential.installationId));
+  db.oauthStates = db.oauthStates.filter((state) => !installationIds.has(state.installationId));
+  db.oauthEvents = db.oauthEvents.filter((event) => !installationIds.has(event.installationId));
+  await writeDb(db);
+  sendJson(response, 200, { ok: true });
+}
+
+async function handleUnpairInstallation(request, response, installationId) {
+  const db = await readDbWithBootstrap();
+  const user = requireUser(db, request);
+  const installation = requireInstallationAccess(db, user, installationId);
+  const now = nowIso();
+  db.pairingTokens
+    .filter((token) => token.installationId === installation.installationId)
+    .forEach((token) => {
+      token.status = "revoked";
+      token.revokedAt = token.revokedAt || now;
+    });
+  db.installations = db.installations.filter((item) => item.installationId !== installation.installationId);
+  db.alerts = db.alerts.filter((alert) => alert.installationId !== installation.installationId);
+  db.events = db.events.filter((event) => event.installationId !== installation.installationId);
+  db.oauthCredentials = db.oauthCredentials.filter((credential) => credential.installationId !== installation.installationId);
+  db.oauthStates = db.oauthStates.filter((state) => state.installationId !== installation.installationId);
+  db.oauthEvents = db.oauthEvents.filter((event) => event.installationId !== installation.installationId);
+  const client = db.clients.find((item) => item.id === installation.clientId);
+  if (client) client.updatedAt = now;
+  await writeDb(db);
+  sendJson(response, 200, {
+    ok: true,
+    client: client ? publicClient(db, client) : null
   });
 }
 
@@ -1345,6 +1462,9 @@ async function handlePairTronsoftos(request, response) {
   if (!client) {
     throw httpError(404, "Cliente vinculado ao token nao encontrado.");
   }
+  if (client.status === "inactive") {
+    throw httpError(403, "Cliente inativo na Central.");
+  }
 
   const installation = upsertInstallationForClient(db, client, payload);
   token.usedAt = token.usedAt || nowIso();
@@ -1494,6 +1614,30 @@ async function handleApi(request, response, pathname) {
   const clientUpdateMatch = pathname.match(/^\/api\/clients\/([^/]+)$/);
   if (request.method === "PATCH" && clientUpdateMatch) {
     await handleUpdateClient(request, response, clientUpdateMatch[1]);
+    return;
+  }
+
+  const clientStatusMatch = pathname.match(/^\/api\/clients\/([^/]+)\/status$/);
+  if (request.method === "POST" && clientStatusMatch) {
+    await handleSetClientStatus(request, response, clientStatusMatch[1]);
+    return;
+  }
+
+  const clientTokenMatch = pathname.match(/^\/api\/clients\/([^/]+)\/token$/);
+  if (request.method === "POST" && clientTokenMatch) {
+    await handleResetClientToken(request, response, clientTokenMatch[1]);
+    return;
+  }
+
+  const clientDeleteMatch = pathname.match(/^\/api\/clients\/([^/]+)$/);
+  if (request.method === "DELETE" && clientDeleteMatch) {
+    await handleDeleteClient(request, response, clientDeleteMatch[1]);
+    return;
+  }
+
+  const installationUnpairMatch = pathname.match(/^\/api\/installations\/([^/]+)\/unpair$/);
+  if (request.method === "POST" && installationUnpairMatch) {
+    await handleUnpairInstallation(request, response, installationUnpairMatch[1]);
     return;
   }
 
