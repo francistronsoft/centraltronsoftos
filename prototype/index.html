@@ -6,7 +6,7 @@
     <title>Central TronSoftOS</title>
     <link rel="icon" href="favicon.svg?v=central-c" type="image/svg+xml">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=20260724-central-backup">
+    <link rel="stylesheet" href="styles.css?v=20260724-backup-download">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -383,6 +383,7 @@
               <div class="maintenance-actions">
                 <button id="maintenance-backup-button" class="primary-button" type="button">Executar backup agora</button>
                 <button id="maintenance-backup-refresh-button" class="secondary-button" type="button">Atualizar status</button>
+                <button id="maintenance-backup-download-button" class="secondary-button" type="button" disabled>Baixar ultimo backup</button>
               </div>
               <div id="maintenance-backup-status" class="maintenance-result">
                 Consultando ultimo backup...
@@ -437,6 +438,6 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260724-central-backup"></script>
+    <script src="app.js?v=20260724-backup-download"></script>
   </body>
 </html>

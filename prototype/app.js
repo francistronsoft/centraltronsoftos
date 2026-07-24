@@ -1658,6 +1658,10 @@ function renderClientDetail(client) {
   const databaseSize = databaseSizeLabel(database);
   const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
   const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
+  const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
+  const cpuCores = host.cpuCores ?? host.processorCount ?? "-";
+  const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
+  const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
@@ -1706,6 +1710,9 @@ function renderClientDetail(client) {
             ${detailItem("Hostname", host.hostname)}
             ${detailItem("IP", host.ip)}
             ${detailItem("Sistema", host.os)}
+            ${detailItem("CPU", cpuModel)}
+            ${detailItem("Nucleos", cpuCores)}
+            ${detailItem("Memoria RAM", memoryTotalLabel)}
             ${detailItem("Uptime", metrics.hostUptimeSeconds ? `${Math.round(Number(metrics.hostUptimeSeconds) / 3600)} h` : "-")}
           </div>
         </article>
@@ -2172,7 +2179,9 @@ function renderBackupJob(job) {
 
 function renderBackupStatus(status) {
   const result = document.querySelector("#maintenance-backup-status");
+  const downloadButton = document.querySelector("#maintenance-backup-download-button");
   if (!result) return;
+  if (downloadButton) downloadButton.disabled = !status.ok;
   result.className = `maintenance-result ${status.ok ? "success" : "failed"}`;
   if (!status.ok) {
     result.innerHTML = `
@@ -2198,6 +2207,10 @@ function renderBackupStatus(status) {
     <p><code>${escapeHtml(status.file || "")}</code></p>
     <p>SHA256: <code>${escapeHtml(status.sha256 || "")}</code></p>
   `;
+}
+
+function downloadLatestBackup() {
+  window.location.href = "/api/maintenance/backup/download";
 }
 
 async function pollMaintenanceJob() {
@@ -2496,6 +2509,7 @@ document.querySelector("#client-detail-back").addEventListener("click", closeCli
 document.querySelector("#maintenance-update-button").addEventListener("click", requestMaintenanceUpdate);
 document.querySelector("#maintenance-backup-button").addEventListener("click", requestMaintenanceBackup);
 document.querySelector("#maintenance-backup-refresh-button").addEventListener("click", loadBackupStatus);
+document.querySelector("#maintenance-backup-download-button").addEventListener("click", downloadLatestBackup);
 
 document.querySelector("#refresh-button").innerHTML = iconRefresh();
 document.querySelector("#logout-button").innerHTML = iconLogout();

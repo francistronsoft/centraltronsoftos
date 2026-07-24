@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { spawn } from "node:child_process";
-import { extname, join, normalize, resolve } from "node:path";
+import { basename, extname, join, normalize, resolve } from "node:path";
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { readDb, storageInfo, writeDb } from "./storage.js";
@@ -174,6 +174,33 @@ async function backupStatus() {
   } catch {
     throw httpError(502, "Status de backup retornou JSON invalido.");
   }
+}
+
+async function downloadLatestBackup(response) {
+  const status = await backupStatus();
+  if (!status.ok || !status.file) {
+    throw httpError(404, status.message || "Nenhum backup disponivel para download.");
+  }
+
+  const filePath = normalize(String(status.file));
+  const fileName = basename(filePath);
+  if (!/^central-\d{8}-\d{6}\.tar\.gz$/.test(fileName)) {
+    throw httpError(403, "Arquivo de backup invalido.");
+  }
+
+  const fileInfo = await stat(filePath).catch(() => null);
+  if (!fileInfo?.isFile()) {
+    throw httpError(404, "Arquivo de backup nao encontrado no servidor.");
+  }
+
+  response.writeHead(200, {
+    "content-type": "application/gzip",
+    "content-length": fileInfo.size,
+    "content-disposition": `attachment; filename="${fileName}"`,
+    "cache-control": "no-store, max-age=0",
+    "pragma": "no-cache"
+  });
+  createReadStream(filePath).pipe(response);
 }
 
 function normalizeStatus(status) {
@@ -607,11 +634,7 @@ function upsertInstallation(db, client, payload) {
       indexHealth: payload.database?.indexHealth ?? null,
       history: existing?.database?.history || []
     },
-    host: {
-      hostname: payload.host?.hostname || "",
-      os: payload.host?.os || "",
-      ip: payload.host?.ip || ""
-    },
+    host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
     backups: payload.backups || {},
     metrics: incomingMetrics(payload, existing?.metrics || {}),
@@ -663,11 +686,7 @@ function upsertInstallationForClient(db, client, payload) {
       indexHealth: payload.database?.indexHealth ?? null,
       history: existing?.database?.history || []
     },
-    host: {
-      hostname: payload.host?.hostname || "",
-      os: payload.host?.os || "",
-      ip: payload.host?.ip || ""
-    },
+    host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
     backups: payload.backups || {},
     metrics: incomingMetrics(payload, existing?.metrics || {}),
@@ -685,6 +704,57 @@ function upsertInstallationForClient(db, client, payload) {
   db.installations.push(installation);
   appendDatabaseHistory(installation);
   return installation;
+}
+
+function normalizedHostPayload(payload = {}, existing = null) {
+  const host = payload.host && typeof payload.host === "object" ? payload.host : {};
+  const metrics = payload.metrics && typeof payload.metrics === "object" ? payload.metrics : {};
+  const systemMetrics = metrics.systemMetrics && typeof metrics.systemMetrics === "object" ? metrics.systemMetrics : {};
+  const latest = Array.isArray(systemMetrics.latest) ? systemMetrics.latest[0] : systemMetrics.latest;
+  const latestRow = latest && typeof latest === "object" ? latest : {};
+  const memory = systemMetrics.memory && typeof systemMetrics.memory === "object" ? systemMetrics.memory : {};
+  const previousHost = existing?.host && typeof existing.host === "object" ? existing.host : {};
+
+  const cpuModel = host.cpuModel
+    || host.cpuName
+    || host.processorName
+    || latestRow.cpuModel
+    || latestRow.cpuName
+    || systemMetrics.cpuModel
+    || systemMetrics.cpuName
+    || previousHost.cpuModel
+    || "";
+  const cpuCores = host.cpuCores
+    ?? host.processorCount
+    ?? latestRow.cpuCores
+    ?? latestRow.processorCount
+    ?? systemMetrics.cpuCores
+    ?? systemMetrics.processorCount
+    ?? previousHost.cpuCores
+    ?? null;
+  const memoryTotalBytes = host.memoryTotalBytes
+    ?? host.ramTotalBytes
+    ?? latestRow.memoryTotalBytes
+    ?? latestRow.ramTotalBytes
+    ?? systemMetrics.memoryTotalBytes
+    ?? systemMetrics.ramTotalBytes
+    ?? memory.totalBytes
+    ?? memory.TotalBytes
+    ?? previousHost.memoryTotalBytes
+    ?? null;
+
+  return {
+    hostname: host.hostname || previousHost.hostname || "",
+    os: host.os || previousHost.os || "",
+    architecture: host.architecture || host.arch || previousHost.architecture || "",
+    ip: host.ip || previousHost.ip || "",
+    cpuModel,
+    cpuName: cpuModel,
+    cpuCores: Number.isFinite(Number(cpuCores)) ? Number(cpuCores) : null,
+    processorCount: Number.isFinite(Number(cpuCores)) ? Number(cpuCores) : null,
+    memoryTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null,
+    ramTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null
+  };
 }
 
 function databaseSizeMb(database = {}) {
@@ -1820,6 +1890,12 @@ async function handleApi(request, response, pathname) {
   if (request.method === "GET" && pathname === "/api/maintenance/backup/status") {
     requireTronsoft(user);
     sendJson(response, 200, await backupStatus());
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/maintenance/backup/download") {
+    requireTronsoft(user);
+    await downloadLatestBackup(response);
     return;
   }
 
