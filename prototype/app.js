@@ -1435,6 +1435,57 @@ function indexAuditDetail(database = {}) {
   return `${inactive} inativo(s)${delta > 0 ? `, +${delta} novo(s)` : ""}${checkedAt ? ` em ${checkedAt}` : ""}`;
 }
 
+function renderIndexNames(names = [], emptyText = "sem itens") {
+  if (!Array.isArray(names) || names.length === 0) {
+    return `<span class="index-audit-empty">${escapeHtml(emptyText)}</span>`;
+  }
+  return names.slice(0, 8).map((name) => `<code>${escapeHtml(name)}</code>`).join("");
+}
+
+function renderIndexAuditHistory(database = {}) {
+  const audit = database.indexAudit;
+  const history = Array.isArray(database.indexAuditHistory) ? database.indexAuditHistory : [];
+  const rows = history.length ? history.slice(-8).reverse() : (audit ? [audit] : []);
+  if (!rows.length) {
+    return `<p class="empty-note">Nenhum historico de indices recebido ainda.</p>`;
+  }
+
+  return `
+    <div class="index-audit-summary">
+      <span>Total <strong>${escapeHtml(audit?.totalIndexes ?? "-")}</strong></span>
+      <span>Ativos <strong>${escapeHtml(audit?.activeIndexes ?? "-")}</strong></span>
+      <span>Inativos <strong>${escapeHtml(audit?.inactiveIndexes ?? "-")}</strong></span>
+      <span>Delta <strong>${escapeHtml(Number(audit?.inactiveDelta || 0) > 0 ? `+${audit.inactiveDelta}` : audit?.inactiveDelta ?? "0")}</strong></span>
+    </div>
+    <div class="index-audit-timeline">
+      ${rows.map((row) => {
+        const inactive = Number(row.inactiveIndexes ?? 0);
+        const delta = Number(row.inactiveDelta ?? 0);
+        const tone = inactive === 0 ? "online" : delta > 0 ? "critical" : "warning";
+        return `
+          <article class="index-audit-row ${escapeHtml(tone)}">
+            <div class="index-audit-row-main">
+              <strong>${escapeHtml(row.checkedAt ? formatDateTime(row.checkedAt) : "sem data")}</strong>
+              <span>${escapeHtml(row.activeIndexes ?? "-")} / ${escapeHtml(row.totalIndexes ?? "-")} ativos - ${escapeHtml(row.inactiveIndexes ?? "-")} inativo(s)</span>
+              <small>${escapeHtml(delta > 0 ? `+${delta} novo(s) inativo(s)` : delta < 0 ? `${delta} inativo(s)` : "sem mudanca na coleta")}</small>
+            </div>
+            <div class="index-audit-lists">
+              <div>
+                <span>Novos inativos</span>
+                <div>${renderIndexNames(row.newInactiveIndexes, "nenhum novo")}</div>
+              </div>
+              <div>
+                <span>Reativados</span>
+                <div>${renderIndexNames(row.reactivatedIndexes, "nenhum reativado")}</div>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function detailTemperaturePanel(client) {
   const temperature = temperatureStatus(client);
   return `
@@ -1788,6 +1839,18 @@ function renderClientDetail(client) {
           ${detailItem("Auditoria indice", indexAuditDetail(database))}
           ${detailItem("Alias", database.alias || database.databaseAlias)}
         </div>
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Historico de indices</h3>
+            <span>mudancas detectadas pelo agente</span>
+          </div>
+        </div>
+        ${renderIndexAuditHistory(database)}
       </article>
     </section>
 
