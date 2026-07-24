@@ -17,6 +17,8 @@ const resellerRole = "reseller_user";
 const googleDriveScope = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 const updateCommand = process.env.CENTRAL_UPDATE_COMMAND || "/usr/local/sbin/central-tronsoftos-update";
 const updateTimeoutMs = Number(process.env.CENTRAL_UPDATE_TIMEOUT_MS || 15 * 60 * 1000);
+const backupCommand = process.env.CENTRAL_BACKUP_COMMAND || "/usr/local/sbin/central-tronsoftos-backup";
+const backupTimeoutMs = Number(process.env.CENTRAL_BACKUP_TIMEOUT_MS || 20 * 60 * 1000);
 const maxJobLogLength = 80_000;
 const maxMetricSeries = 288;
 const offlineAfterMinutes = Number(process.env.CENTRAL_OFFLINE_AFTER_MINUTES || 5);
@@ -44,6 +46,7 @@ function appendJobLog(job, stream, chunk) {
 function publicMaintenanceJob(job) {
   return {
     id: job.id,
+    kind: job.kind,
     status: job.status,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
@@ -54,16 +57,22 @@ function publicMaintenanceJob(job) {
   };
 }
 
-function startMaintenanceUpdateJob() {
-  const runningJob = [...maintenanceJobs.values()].reverse().find((job) => job.status === "running");
+function commandWithSudo(command, args = []) {
+  const useSudo = typeof process.getuid === "function" && process.getuid() !== 0;
+  return useSudo
+    ? { command: "sudo", args: [command, ...args] }
+    : { command, args };
+}
+
+function startMaintenanceCommandJob(kind, baseCommand, baseArgs = [], timeoutMs = updateTimeoutMs) {
+  const runningJob = [...maintenanceJobs.values()].reverse().find((job) => job.kind === kind && job.status === "running");
   if (runningJob) return publicMaintenanceJob(runningJob);
 
   const id = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-  const useSudo = typeof process.getuid === "function" && process.getuid() !== 0;
-  const command = useSudo ? "sudo" : updateCommand;
-  const args = useSudo ? [updateCommand] : [];
+  const { command, args } = commandWithSudo(baseCommand, baseArgs);
   const job = {
     id,
+    kind,
     status: "running",
     startedAt: nowIso(),
     finishedAt: null,
@@ -112,6 +121,59 @@ function startMaintenanceUpdateJob() {
   });
 
   return publicMaintenanceJob(job);
+}
+
+function startMaintenanceUpdateJob() {
+  return startMaintenanceCommandJob("update", updateCommand, [], updateTimeoutMs);
+}
+
+function startMaintenanceBackupJob() {
+  return startMaintenanceCommandJob("backup", backupCommand, ["run"], backupTimeoutMs);
+}
+
+function runMaintenanceCommand(commandPath, args = [], timeoutMs = 15_000) {
+  return new Promise((resolvePromise, reject) => {
+    const commandSpec = commandWithSudo(commandPath, args);
+    const child = spawn(commandSpec.command, commandSpec.args, {
+      cwd: rootDir,
+      env: process.env,
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("tempo limite excedido"));
+    }, timeoutMs);
+    timer.unref?.();
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolvePromise({ stdout, stderr });
+      } else {
+        reject(new Error(stderr.trim() || stdout.trim() || `comando saiu com codigo ${code}`));
+      }
+    });
+  });
+}
+
+async function backupStatus() {
+  const result = await runMaintenanceCommand(backupCommand, ["status-json"], 15_000);
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw httpError(502, "Status de backup retornou JSON invalido.");
+  }
 }
 
 function normalizeStatus(status) {
@@ -1743,6 +1805,21 @@ async function handleApi(request, response, pathname) {
       ok: true,
       job: startMaintenanceUpdateJob()
     });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/maintenance/backup") {
+    requireTronsoft(user);
+    sendJson(response, 202, {
+      ok: true,
+      job: startMaintenanceBackupJob()
+    });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/maintenance/backup/status") {
+    requireTronsoft(user);
+    sendJson(response, 200, await backupStatus());
     return;
   }
 

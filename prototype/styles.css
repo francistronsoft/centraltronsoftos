@@ -1835,6 +1835,16 @@ tr.clickable-row:hover,
   padding: 18px;
 }
 
+.maintenance-panel + .maintenance-panel {
+  margin-top: 18px;
+}
+
+.maintenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .maintenance-box .primary-button {
   width: fit-content;
 }

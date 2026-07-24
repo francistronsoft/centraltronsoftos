@@ -22,6 +22,8 @@ let clientPage = 1;
 let environmentPage = 1;
 let maintenanceJobId = null;
 let maintenancePollTimer = null;
+let backupJobId = null;
+let backupPollTimer = null;
 let geoLeafletMap = null;
 let geoLeafletLayer = null;
 let selectedClientId = "";
@@ -371,6 +373,7 @@ async function ensureActiveViewData() {
   if (activeView === "users") await loadUsersIfNeeded();
   if (activeView === "oauth") await loadOAuthSummaryIfNeeded();
   if (activeView === "environments") renderEnvironments();
+  if (activeView === "maintenance") await loadBackupStatus();
 }
 
 async function loadSession() {
@@ -2149,6 +2152,54 @@ function renderMaintenanceJob(job) {
   `;
 }
 
+function renderBackupJob(job) {
+  const result = document.querySelector("#maintenance-backup-result");
+  const button = document.querySelector("#maintenance-backup-button");
+  if (!result || !button) return;
+  const output = [job.stdout, job.stderr].filter(Boolean).join("\n").trim();
+  button.disabled = job.status === "running";
+  result.hidden = false;
+  result.className = `maintenance-result ${escapeHtml(job.status)}`;
+  result.innerHTML = `
+    <div class="maintenance-status">
+      <strong>${job.status === "running" ? "Executando backup" : job.status === "success" ? "Backup concluido" : "Backup falhou"}</strong>
+      <span>${job.finishedAt ? formatDateTime(job.finishedAt) : "Aguardando conclusao..."}</span>
+    </div>
+    ${job.error ? `<p>${escapeHtml(job.error)}</p>` : ""}
+    <pre>${escapeHtml(output || "Aguardando saida do comando...")}</pre>
+  `;
+}
+
+function renderBackupStatus(status) {
+  const result = document.querySelector("#maintenance-backup-status");
+  if (!result) return;
+  result.className = `maintenance-result ${status.ok ? "success" : "failed"}`;
+  if (!status.ok) {
+    result.innerHTML = `
+      <div class="maintenance-status">
+        <strong>Sem backup registrado</strong>
+        <span>${escapeHtml(status.backupDir || "")}</span>
+      </div>
+      <p>${escapeHtml(status.message || "Nenhum backup encontrado.")}</p>
+    `;
+    return;
+  }
+  const remoteLabel = status.remoteStatus === "success"
+    ? "copia remota OK"
+    : status.remoteStatus === "failed"
+      ? `copia remota falhou: ${status.remoteError || "erro desconhecido"}`
+      : "copia remota nao configurada";
+  result.innerHTML = `
+    <div class="maintenance-status">
+      <strong>Ultimo backup: ${escapeHtml(status.fileName || "-")}</strong>
+      <span>${escapeHtml(formatDateTime(status.createdAt))}</span>
+    </div>
+    <p>${escapeHtml(bytesLabel(status.sizeBytes))} - ${escapeHtml(status.storage || "storage")} - ${escapeHtml(remoteLabel)}</p>
+    <p><code>${escapeHtml(status.file || "")}</code></p>
+    <p>SHA256: <code>${escapeHtml(status.sha256 || "")}</code></p>
+  `;
+}
+
 async function pollMaintenanceJob() {
   if (!maintenanceJobId) return;
   try {
@@ -2163,6 +2214,27 @@ async function pollMaintenanceJob() {
     const result = document.querySelector("#maintenance-result");
     result.className = "maintenance-result failed";
     result.textContent = error.message || "Nao foi possivel consultar a atualizacao.";
+  }
+}
+
+async function pollBackupJob() {
+  if (!backupJobId) return;
+  try {
+    const job = await api(`/api/maintenance/jobs/${backupJobId}`);
+    renderBackupJob(job);
+    if (job.status === "running") {
+      backupPollTimer = setTimeout(pollBackupJob, 2000);
+      return;
+    }
+    backupJobId = null;
+    await loadBackupStatus();
+  } catch (error) {
+    const result = document.querySelector("#maintenance-backup-result");
+    if (result) {
+      result.hidden = false;
+      result.className = "maintenance-result failed";
+      result.textContent = error.message || "Nao foi possivel consultar o backup.";
+    }
   }
 }
 
@@ -2184,6 +2256,40 @@ async function requestMaintenanceUpdate() {
     button.disabled = false;
     result.className = "maintenance-result failed";
     result.textContent = error.message || "Nao foi possivel iniciar a atualizacao.";
+  }
+}
+
+async function loadBackupStatus() {
+  const result = document.querySelector("#maintenance-backup-status");
+  if (!result || currentUser?.role !== "tronsoft_admin") return;
+  try {
+    const status = await api("/api/maintenance/backup/status");
+    renderBackupStatus(status);
+  } catch (error) {
+    result.className = "maintenance-result failed";
+    result.textContent = error.message || "Nao foi possivel consultar o status do backup.";
+  }
+}
+
+async function requestMaintenanceBackup() {
+  const result = document.querySelector("#maintenance-backup-result");
+  const button = document.querySelector("#maintenance-backup-button");
+  if (!confirm("Executar backup da Central agora?")) return;
+  button.disabled = true;
+  result.hidden = false;
+  result.className = "maintenance-result running";
+  result.innerHTML = "<strong>Iniciando backup...</strong>";
+  if (backupPollTimer) clearTimeout(backupPollTimer);
+
+  try {
+    const payload = await api("/api/maintenance/backup", { method: "POST" });
+    backupJobId = payload.job.id;
+    renderBackupJob(payload.job);
+    backupPollTimer = setTimeout(pollBackupJob, 1500);
+  } catch (error) {
+    button.disabled = false;
+    result.className = "maintenance-result failed";
+    result.textContent = error.message || "Nao foi possivel iniciar o backup.";
   }
 }
 
@@ -2388,6 +2494,8 @@ document.querySelector("#user-role-select").addEventListener("change", updateUse
 document.querySelector("#account-password-form").addEventListener("submit", changeOwnPassword);
 document.querySelector("#client-detail-back").addEventListener("click", closeClientDetail);
 document.querySelector("#maintenance-update-button").addEventListener("click", requestMaintenanceUpdate);
+document.querySelector("#maintenance-backup-button").addEventListener("click", requestMaintenanceBackup);
+document.querySelector("#maintenance-backup-refresh-button").addEventListener("click", loadBackupStatus);
 
 document.querySelector("#refresh-button").innerHTML = iconRefresh();
 document.querySelector("#logout-button").innerHTML = iconLogout();

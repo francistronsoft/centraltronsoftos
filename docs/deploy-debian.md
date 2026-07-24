@@ -307,9 +307,51 @@ sudo certbot --nginx -d central.seudominio.com.br
 - Heartbeat: `POST /api/tronsoftos/heartbeat`
 - Alertas: `POST /api/tronsoftos/alerts`
 
+## Backup e restauracao
+
+O `install.sh` instala:
+
+- `/usr/local/sbin/central-tronsoftos-backup`
+- `/usr/local/sbin/central-tronsoftos-restore`
+- `central-tronsoftos-backup.service`
+- `central-tronsoftos-backup.timer`
+
+Verificar timer:
+
+```bash
+sudo systemctl status central-tronsoftos-backup.timer
+sudo systemctl list-timers central-tronsoftos-backup.timer
+```
+
+Executar backup manual:
+
+```bash
+sudo /usr/local/sbin/central-tronsoftos-backup run
+```
+
+Arquivos locais:
+
+```bash
+sudo ls -lh /var/backups/central-tronsoftos
+sudo cat /var/backups/central-tronsoftos/latest.json
+```
+
+Restaurar em outro Debian:
+
+```bash
+sudo /usr/local/sbin/central-tronsoftos-restore /var/backups/central-tronsoftos/central-YYYYmmdd-HHMMSS.tar.gz
+```
+
+Para copia remota via `rclone`, configure em `/etc/central-tronsoftos/central.env`:
+
+```env
+CENTRAL_TRONSOFTOS_BACKUP_RCLONE_REMOTE=gdrive:central-tronsoftos
+CENTRAL_TRONSOFTOS_BACKUP_RETENTION_DAYS=30
+```
+
 ## Observacoes para piloto
 
-- Faca backup do PostgreSQL.
+- Confira se o backup diario esta ativo antes de cadastrar clientes reais.
 - Mantenha a porta `3080` fechada externamente se estiver usando Nginx.
 - Use HTTPS antes de enviar tokens de instalacao pela internet.
-- Para producao, adicionar autenticacao administrativa completa e politicas de backup/retencao.
+- Teste restauracao em outro Debian antes de producao.

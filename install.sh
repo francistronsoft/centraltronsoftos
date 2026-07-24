@@ -341,6 +341,20 @@ EOF
   as_root systemctl restart "$SERVICE_NAME"
 }
 
+install_backup_service() {
+  if [[ -f "$APP_DIR/scripts/install-backup-service.sh" ]]; then
+    log "Configurando backup automatico da Central"
+    as_root env \
+      CENTRAL_TRONSOFTOS_SERVICE="$SERVICE_NAME" \
+      CENTRAL_TRONSOFTOS_USER="$APP_USER" \
+      CENTRAL_TRONSOFTOS_APP_DIR="$APP_DIR" \
+      CENTRAL_TRONSOFTOS_ENV_FILE="$ENV_FILE" \
+      bash "$APP_DIR/scripts/install-backup-service.sh"
+  else
+    warn "Script de backup nao encontrado em $APP_DIR/scripts/install-backup-service.sh"
+  fi
+}
+
 setup_nginx() {
   log "Configurando Nginx para $DOMAIN"
   as_root apt-get update
@@ -508,6 +522,7 @@ main() {
   install_app_dependencies
   write_env
   write_systemd
+  install_backup_service
   maybe_setup_nginx
   maybe_setup_cloudflared
   health_check

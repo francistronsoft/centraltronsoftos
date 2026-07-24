@@ -83,6 +83,25 @@ GOOGLE_OAUTH_REDIRECT_URI=https://central.tronsoft.app.br/api/oauth/google/callb
 
 No Google Cloud Console, a URI autorizada de redirecionamento deve ser exatamente a mesma `GOOGLE_OAUTH_REDIRECT_URI`.
 
+## Backup e restauracao
+
+O instalador configura backup diario da Central via `systemd timer`.
+
+- Arquivos locais: `/var/backups/central-tronsoftos/central-*.tar.gz`
+- Status do ultimo backup: `/var/backups/central-tronsoftos/latest.json`
+- Timer: `central-tronsoftos-backup.timer`
+- Execucao manual: `sudo /usr/local/sbin/central-tronsoftos-backup run`
+- Restauracao: `sudo /usr/local/sbin/central-tronsoftos-restore /var/backups/central-tronsoftos/central-YYYYmmdd-HHMMSS.tar.gz`
+
+Para enviar copia remota com `rclone`, adicione no `/etc/central-tronsoftos/central.env`:
+
+```text
+CENTRAL_TRONSOFTOS_BACKUP_RCLONE_REMOTE=gdrive:central-tronsoftos
+CENTRAL_TRONSOFTOS_BACKUP_RETENTION_DAYS=30
+```
+
+No painel da Central, usuario TronSoft pode acessar **Manutencao > Backup da Central** para executar backup manual e consultar o ultimo backup.
+
 ## API inicial
 
 A primeira implementacao recebe:
