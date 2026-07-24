@@ -1308,6 +1308,7 @@ function isVisibleAlert(alert = {}) {
 
 function indexHealthStatus(client) {
   const health = client.databaseInfo?.indexHealth;
+  const audit = client.databaseInfo?.indexAudit;
   const alert = currentAlerts.find((item) => {
     const text = `${item.code || ""} ${item.title || ""} ${item.message || ""}`.toLowerCase();
     return item.clientId === client.id
@@ -1321,6 +1322,26 @@ function indexHealthStatus(client) {
   const missingCriticalTables = Array.isArray(health?.missingActiveTables) ? health.missingActiveTables : [];
   const active = health?.activeIndexes ?? health?.active ?? "-";
   const total = health?.totalIndexes ?? health?.total ?? "-";
+  if (audit && Number.isFinite(Number(audit.inactiveIndexes))) {
+    const auditActive = audit.activeIndexes ?? active;
+    const auditTotal = audit.totalIndexes ?? total;
+    const inactive = Number(audit.inactiveIndexes);
+    const delta = Number(audit.inactiveDelta || 0);
+    if (inactive > 0) {
+      return {
+        label: "Indice em atencao",
+        shortLabel: "Atencao",
+        tone: delta > 0 ? "offline" : "warning",
+        detail: `${auditActive} / ${auditTotal} ativos, ${inactive} inativo(s)${delta > 0 ? `, +${delta} desde a ultima coleta` : ""}`
+      };
+    }
+    return {
+      label: "Indices OK",
+      shortLabel: "OK",
+      tone: "online",
+      detail: `${auditActive} / ${auditTotal} ativos`
+    };
+  }
   if (health?.error || severity === "unknown" || severity === "erro" || severity === "error") {
     return {
       label: "Indices nao verificados",
@@ -1400,6 +1421,18 @@ function detailMetric(title, value, tone = "neutral", caption = "") {
       <small>${escapeHtml(caption)}</small>
     </article>
   `;
+}
+
+function indexAuditDetail(database = {}) {
+  const audit = database.indexAudit;
+  if (!audit) return "-";
+  if (audit.error) return audit.error;
+  if (!Number.isFinite(Number(audit.inactiveIndexes))) return "-";
+  const inactive = Number(audit.inactiveIndexes);
+  const delta = Number(audit.inactiveDelta || 0);
+  const checkedAt = audit.checkedAt ? formatDateTime(audit.checkedAt) : "";
+  if (inactive === 0) return checkedAt ? `OK em ${checkedAt}` : "OK";
+  return `${inactive} inativo(s)${delta > 0 ? `, +${delta} novo(s)` : ""}${checkedAt ? ` em ${checkedAt}` : ""}`;
 }
 
 function detailTemperaturePanel(client) {
@@ -1752,6 +1785,7 @@ function renderClientDetail(client) {
           ${detailItem("Tamanho", databaseSize)}
           ${detailItem("Indices", indexStatus.label)}
           ${detailItem("Detalhe indice", indexStatus.detail)}
+          ${detailItem("Auditoria indice", indexAuditDetail(database))}
           ${detailItem("Alias", database.alias || database.databaseAlias)}
         </div>
       </article>

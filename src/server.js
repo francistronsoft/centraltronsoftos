@@ -632,6 +632,8 @@ function upsertInstallation(db, client, payload) {
       databaseName: payload.database?.databaseName || "",
       databaseAlias: payload.database?.databaseAlias || payload.database?.alias || "",
       indexHealth: payload.database?.indexHealth ?? null,
+      indexAudit: normalizeIndexAudit(payload.database?.indexAudit, existing?.database?.indexAudit),
+      indexAuditHistory: existing?.database?.indexAuditHistory || [],
       history: existing?.database?.history || []
     },
     host: normalizedHostPayload(payload, existing),
@@ -646,11 +648,13 @@ function upsertInstallation(db, client, payload) {
   if (existing) {
     Object.assign(existing, installation);
     appendDatabaseHistory(existing);
+    appendIndexAuditHistory(existing);
     return existing;
   }
 
   db.installations.push(installation);
   appendDatabaseHistory(installation);
+  appendIndexAuditHistory(installation);
   return installation;
 }
 
@@ -684,6 +688,8 @@ function upsertInstallationForClient(db, client, payload) {
       databaseName: payload.database?.databaseName || "",
       databaseAlias: payload.database?.databaseAlias || payload.database?.alias || "",
       indexHealth: payload.database?.indexHealth ?? null,
+      indexAudit: normalizeIndexAudit(payload.database?.indexAudit, existing?.database?.indexAudit),
+      indexAuditHistory: existing?.database?.indexAuditHistory || [],
       history: existing?.database?.history || []
     },
     host: normalizedHostPayload(payload, existing),
@@ -698,11 +704,13 @@ function upsertInstallationForClient(db, client, payload) {
   if (existing) {
     Object.assign(existing, installation);
     appendDatabaseHistory(existing);
+    appendIndexAuditHistory(existing);
     return existing;
   }
 
   db.installations.push(installation);
   appendDatabaseHistory(installation);
+  appendIndexAuditHistory(installation);
   return installation;
 }
 
@@ -755,6 +763,58 @@ function normalizedHostPayload(payload = {}, existing = null) {
     memoryTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null,
     ramTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null
   };
+}
+
+function normalizeIndexAudit(audit = null, previous = null) {
+  if (!audit || typeof audit !== "object") return previous || null;
+  const inactiveIndexes = audit.inactiveIndexes ?? audit.inactive ?? audit.disabledIndexes ?? null;
+  const activeIndexes = audit.activeIndexes ?? audit.active ?? null;
+  const totalIndexes = audit.totalIndexes ?? audit.total ?? null;
+  const inactiveDelta = audit.inactiveDelta ?? audit.delta ?? null;
+  const checkedAt = audit.checkedAt || audit.collectedAt || nowIso();
+  return {
+    status: audit.status || (Number(inactiveIndexes) > 0 ? "attention" : "ok"),
+    checkedAt,
+    totalIndexes: Number.isFinite(Number(totalIndexes)) ? Number(totalIndexes) : null,
+    activeIndexes: Number.isFinite(Number(activeIndexes)) ? Number(activeIndexes) : null,
+    inactiveIndexes: Number.isFinite(Number(inactiveIndexes)) ? Number(inactiveIndexes) : null,
+    previousInactiveIndexes: Number.isFinite(Number(audit.previousInactiveIndexes)) ? Number(audit.previousInactiveIndexes) : null,
+    inactiveDelta: Number.isFinite(Number(inactiveDelta)) ? Number(inactiveDelta) : 0,
+    firstSnapshot: audit.firstSnapshot === true,
+    previousCheckedAt: audit.previousCheckedAt || null,
+    newInactiveIndexes: Array.isArray(audit.newInactiveIndexes) ? audit.newInactiveIndexes.slice(0, 100) : [],
+    reactivatedIndexes: Array.isArray(audit.reactivatedIndexes) ? audit.reactivatedIndexes.slice(0, 100) : [],
+    inactiveIndexesSample: Array.isArray(audit.inactiveIndexesSample) ? audit.inactiveIndexesSample.slice(0, 200) : [],
+    inactiveIndexesTruncated: audit.inactiveIndexesTruncated === true,
+    error: audit.error || ""
+  };
+}
+
+function appendIndexAuditHistory(installation) {
+  const audit = installation.database?.indexAudit;
+  if (!audit || typeof audit !== "object") return;
+  if (!Number.isFinite(Number(audit.inactiveIndexes))) return;
+
+  const history = Array.isArray(installation.database.indexAuditHistory)
+    ? installation.database.indexAuditHistory.filter((item) => item && item.checkedAt)
+    : [];
+  const last = history.at(-1);
+  const changed = !last
+    || Number(last.inactiveIndexes) !== Number(audit.inactiveIndexes)
+    || Number(last.activeIndexes) !== Number(audit.activeIndexes)
+    || Number(last.totalIndexes) !== Number(audit.totalIndexes);
+  if (!changed) return;
+
+  history.push({
+    checkedAt: audit.checkedAt || nowIso(),
+    totalIndexes: audit.totalIndexes,
+    activeIndexes: audit.activeIndexes,
+    inactiveIndexes: audit.inactiveIndexes,
+    inactiveDelta: audit.inactiveDelta || 0,
+    newInactiveIndexes: Array.isArray(audit.newInactiveIndexes) ? audit.newInactiveIndexes.slice(0, 20) : [],
+    reactivatedIndexes: Array.isArray(audit.reactivatedIndexes) ? audit.reactivatedIndexes.slice(0, 20) : []
+  });
+  installation.database.indexAuditHistory = history.slice(-60);
 }
 
 function databaseSizeMb(database = {}) {
@@ -1622,12 +1682,14 @@ async function handleHeartbeat(request, response) {
   installation.status = normalizeStatus(payload.status || "online");
   installation.tronsoftos = { ...installation.tronsoftos, ...payload.tronsoftos };
   installation.database = { ...installation.database, ...payload.database };
+  installation.database.indexAudit = normalizeIndexAudit(payload.database?.indexAudit, installation.database.indexAudit);
   installation.database.versaoBanco = payload.database?.versaoBanco
     || payload.database?.versao_banco
     || payload.database?.schemaVersion
     || installation.database.versaoBanco
     || "";
   appendDatabaseHistory(installation);
+  appendIndexAuditHistory(installation);
   resolveIndexAlertsIfHealthy(db, installation);
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
@@ -1663,6 +1725,26 @@ async function handleAlert(request, response) {
   const installation = findInstallationByRequest(db, payload, request);
   const title = requireText(payload.title, "title");
   const severity = normalizeSeverity(payload.severity || "info");
+  const code = payload.code || "";
+  const existing = code
+    ? db.alerts.find((item) => item.installationId === installation.installationId && item.status === "open" && item.code === code)
+    : null;
+
+  if (existing) {
+    existing.title = title;
+    existing.message = payload.message || "";
+    existing.severity = severity;
+    existing.details = payload.details || {};
+    existing.updatedAt = nowIso();
+    addEvent(db, "alert_update", installation, payload);
+    if (severity === "critical") {
+      installation.status = "warning";
+      installation.updatedAt = nowIso();
+    }
+    await writeDb(db);
+    sendJson(response, 200, existing);
+    return;
+  }
 
   const alert = {
     id: randomUUID(),
@@ -1670,7 +1752,7 @@ async function handleAlert(request, response) {
     clientId: installation.clientId,
     title,
     message: payload.message || "",
-    code: payload.code || "",
+    code,
     severity,
     status: "open",
     details: payload.details || {},
