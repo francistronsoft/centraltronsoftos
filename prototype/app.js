@@ -1399,6 +1399,29 @@ function gaugeValue(value) {
   return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : null;
 }
 
+function quotaGaugeValue(quota = {}) {
+  if (!quota || typeof quota !== "object" || quota.ok === false) return null;
+  const total = Number(quota.total ?? quota.totalBytes ?? quota.raw?.total);
+  const used = Number(quota.used ?? quota.usedBytes ?? quota.raw?.used);
+  const free = Number(quota.free ?? quota.freeBytes ?? quota.raw?.free);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(used)) {
+    return gaugeValue((used / total) * 100);
+  }
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(free)) {
+    return gaugeValue(((total - free) / total) * 100);
+  }
+  return gaugeValue(quota.percentUsed ?? quota.usedPercent ?? quota.percent);
+}
+
+function quotaGaugeCaption(quota = {}, googleDrive = {}) {
+  if (quota?.ok === false) return quota.error || "falha ao consultar quota";
+  if (googleDrive?.accountEmail) return googleDrive.accountEmail;
+  if (Number.isFinite(Number(quota?.free)) && Number.isFinite(Number(quota?.total))) {
+    return `${bytesLabel(Number(quota.free))} livres de ${bytesLabel(Number(quota.total))}`;
+  }
+  return "quota remota";
+}
+
 function detailGauge(label, value, tone = "online", caption = "") {
   const percent = gaugeValue(value);
   const display = percent === null ? "--" : `${percent}%`;
@@ -1735,7 +1758,9 @@ function renderClientDetail(client) {
   const disk = gaugeValue(client.diskPercent);
   const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
   const backupDisk = gaugeValue(backups.disk?.percentUsed);
-  const drive = gaugeValue(backups.quota?.percentUsed);
+  const backupDiskTone = backupDisk === null ? "unknown" : backupDisk >= 90 ? "offline" : backupDisk >= 75 ? "warning" : "online";
+  const drive = quotaGaugeValue(backups.quota);
+  const driveTone = backups.quota?.ok === false ? "warning" : drive === null ? "unknown" : drive >= 90 ? "offline" : drive >= 75 ? "warning" : "online";
   const heartbeatAge = client.lastSeenAt ? formatRelativeTime(client.lastSeenAt) : "sem heartbeat";
   const openAlerts = currentAlerts.filter((alert) => alert.clientId === client.id && alert.status !== "resolved").length;
   const indexStatus = indexHealthStatus(client);
@@ -1780,8 +1805,8 @@ function renderClientDetail(client) {
         </div>
         <div class="gauge-grid">
           ${detailGauge("Disco servidor", disk, diskTone, "uso geral informado")}
-          ${detailGauge("Disco backup", backupDisk, backupDisk >= 90 ? "offline" : backupDisk >= 75 ? "warning" : "online", backups.backupDir || "diretorio de backup")}
-          ${detailGauge("Google Drive", drive, drive >= 90 ? "offline" : drive >= 75 ? "warning" : "online", googleDrive.accountEmail || backups.quota?.error || "quota remota")}
+          ${detailGauge("Disco backup", backupDisk, backupDiskTone, backups.backupDir || "diretorio de backup")}
+          ${detailGauge("Google Drive", drive, driveTone, quotaGaugeCaption(backups.quota, googleDrive))}
         </div>
       </article>
     </section>

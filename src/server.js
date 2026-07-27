@@ -638,7 +638,7 @@ function upsertInstallation(db, client, payload) {
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
-    backups: payload.backups || {},
+    backups: normalizeBackups(payload.backups || {}),
     metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
@@ -694,7 +694,7 @@ function upsertInstallationForClient(db, client, payload) {
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
-    backups: payload.backups || {},
+    backups: normalizeBackups(payload.backups || {}),
     metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
     createdAt: existing?.createdAt || nowIso(),
@@ -712,6 +712,41 @@ function upsertInstallationForClient(db, client, payload) {
   appendDatabaseHistory(installation);
   appendIndexAuditHistory(installation);
   return installation;
+}
+
+function normalizeBackups(backups = {}) {
+  if (!backups || typeof backups !== "object") return {};
+  const next = { ...backups };
+  if (next.quota && typeof next.quota === "object") {
+    next.quota = normalizeQuota(next.quota);
+  }
+  return next;
+}
+
+function normalizeQuota(quota = {}) {
+  const next = { ...quota };
+  const total = numberOrNull(next.total ?? next.totalBytes ?? next.raw?.total);
+  const used = numberOrNull(next.used ?? next.usedBytes ?? next.raw?.used);
+  const free = numberOrNull(next.free ?? next.freeBytes ?? next.raw?.free);
+  const reportedPercent = numberOrNull(next.percentUsed ?? next.usedPercent ?? next.percent);
+  const calculatedPercent = total && total > 0 && used !== null
+    ? Math.round((used / total) * 1000) / 10
+    : total && total > 0 && free !== null
+      ? Math.round(((total - free) / total) * 1000) / 10
+      : null;
+  const percentUsed = calculatedPercent !== null ? Math.max(0, Math.min(100, calculatedPercent)) : reportedPercent;
+  return {
+    ...next,
+    ...(total !== null ? { total } : {}),
+    ...(used !== null ? { used } : {}),
+    ...(free !== null ? { free } : {}),
+    percentUsed: next.ok === false ? null : percentUsed
+  };
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizedHostPayload(payload = {}, existing = null) {
@@ -1012,7 +1047,7 @@ function publicInstallation(db, installation) {
     database: installation.database,
     host: installation.host,
     cluster: installation.cluster || {},
-    backups: installation.backups || {},
+    backups: normalizeBackups(installation.backups || {}),
     googleDrive: googleDriveCredential ? {
       accountEmail: googleDriveCredential.accountEmail || "",
       connectedAt: googleDriveCredential.connectedAt || null,
@@ -1693,7 +1728,7 @@ async function handleHeartbeat(request, response) {
   resolveIndexAlertsIfHealthy(db, installation);
   installation.host = { ...installation.host, ...payload.host };
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
-  installation.backups = { ...(installation.backups || {}), ...(payload.backups || {}) };
+  installation.backups = normalizeBackups({ ...(installation.backups || {}), ...(payload.backups || {}) });
   installation.metrics = incomingMetrics(payload, installation.metrics || {});
   installation.lastSeenAt = nowIso();
   installation.updatedAt = nowIso();
