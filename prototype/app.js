@@ -2303,7 +2303,7 @@ function renderBackupStatus(status) {
   const result = document.querySelector("#maintenance-backup-status");
   const downloadButton = document.querySelector("#maintenance-backup-download-button");
   if (!result) return;
-  if (downloadButton) downloadButton.disabled = !status.ok;
+  if (downloadButton) downloadButton.disabled = !status.ok || status.downloadable === false;
   result.className = `maintenance-result ${status.ok ? "success" : "failed"}`;
   if (!status.ok) {
     result.innerHTML = `
@@ -2325,6 +2325,7 @@ function renderBackupStatus(status) {
       <strong>Ultimo backup: ${escapeHtml(status.fileName || "-")}</strong>
       <span>${escapeHtml(formatDateTime(status.createdAt))}</span>
     </div>
+    ${status.message ? `<p>${escapeHtml(status.message)}</p>` : ""}
     <p>${escapeHtml(bytesLabel(status.sizeBytes))} - ${escapeHtml(status.storage || "storage")} - ${escapeHtml(remoteLabel)}</p>
     <p><code>${escapeHtml(status.file || "")}</code></p>
     <p>SHA256: <code>${escapeHtml(status.sha256 || "")}</code></p>

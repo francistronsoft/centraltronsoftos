@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, extname, join, normalize, resolve } from "node:path";
@@ -18,6 +18,7 @@ const googleDriveScope = "https://www.googleapis.com/auth/drive.file https://www
 const updateCommand = process.env.CENTRAL_UPDATE_COMMAND || "/usr/local/sbin/central-tronsoftos-update";
 const updateTimeoutMs = Number(process.env.CENTRAL_UPDATE_TIMEOUT_MS || 15 * 60 * 1000);
 const backupCommand = process.env.CENTRAL_BACKUP_COMMAND || "/usr/local/sbin/central-tronsoftos-backup";
+const backupDir = process.env.CENTRAL_TRONSOFTOS_BACKUP_DIR || "/var/backups/central-tronsoftos";
 const backupTimeoutMs = Number(process.env.CENTRAL_BACKUP_TIMEOUT_MS || 20 * 60 * 1000);
 const maxJobLogLength = 80_000;
 const maxMetricSeries = 288;
@@ -170,10 +171,80 @@ function runMaintenanceCommand(commandPath, args = [], timeoutMs = 15_000) {
 async function backupStatus() {
   const result = await runMaintenanceCommand(backupCommand, ["status-json"], 15_000);
   try {
-    return JSON.parse(result.stdout);
+    return enrichBackupStatus(JSON.parse(result.stdout));
   } catch {
     throw httpError(502, "Status de backup retornou JSON invalido.");
   }
+}
+
+function isCentralBackupFile(filePath) {
+  return /^central-\d{8}-\d{6}\.tar\.gz$/.test(basename(String(filePath || "")));
+}
+
+function isInsideDirectory(filePath, directory) {
+  const basePath = resolve(directory || backupDir);
+  const targetPath = resolve(filePath);
+  return targetPath === basePath || targetPath.startsWith(`${basePath}\\`) || targetPath.startsWith(`${basePath}/`);
+}
+
+async function findLatestBackupFile(directory) {
+  const safeDir = normalize(String(directory || backupDir));
+  const entries = await readdir(safeDir, { withFileTypes: true }).catch(() => []);
+  const candidates = await Promise.all(entries
+    .filter((entry) => entry.isFile() && isCentralBackupFile(entry.name))
+    .map(async (entry) => {
+      const filePath = normalize(join(safeDir, entry.name));
+      const fileInfo = await stat(filePath).catch(() => null);
+      return fileInfo?.isFile() ? { filePath, fileInfo } : null;
+    }));
+
+  return candidates
+    .filter(Boolean)
+    .sort((a, b) => b.fileInfo.mtimeMs - a.fileInfo.mtimeMs)[0] || null;
+}
+
+async function enrichBackupStatus(status = {}) {
+  const directory = status.backupDir || backupDir;
+  const statusFile = status.file ? normalize(String(status.file)) : "";
+  const statusFileInfo = statusFile && isCentralBackupFile(statusFile) && isInsideDirectory(statusFile, directory)
+    ? await stat(statusFile).catch(() => null)
+    : null;
+
+  if (status.ok && status.file && statusFileInfo?.isFile()) {
+    return {
+      ...status,
+      file: statusFile,
+      fileName: status.fileName || basename(statusFile),
+      sizeBytes: Number(status.sizeBytes || statusFileInfo.size),
+      backupDir: directory,
+      downloadable: true
+    };
+  }
+
+  const latest = await findLatestBackupFile(directory);
+  if (!latest) {
+    return {
+      ...status,
+      ok: false,
+      backupDir: directory,
+      downloadable: false,
+      message: status.message || "Nenhum backup encontrado no servidor."
+    };
+  }
+
+  return {
+    ...status,
+    ok: true,
+    file: latest.filePath,
+    fileName: basename(latest.filePath),
+    sizeBytes: latest.fileInfo.size,
+    createdAt: status.createdAt || latest.fileInfo.mtime.toISOString(),
+    backupDir: directory,
+    downloadable: true,
+    message: status.file
+      ? "O backup registrado nao foi encontrado; usando o arquivo mais recente disponivel."
+      : status.message
+  };
 }
 
 async function downloadLatestBackup(response) {
@@ -184,8 +255,11 @@ async function downloadLatestBackup(response) {
 
   const filePath = normalize(String(status.file));
   const fileName = basename(filePath);
-  if (!/^central-\d{8}-\d{6}\.tar\.gz$/.test(fileName)) {
+  if (!isCentralBackupFile(fileName)) {
     throw httpError(403, "Arquivo de backup invalido.");
+  }
+  if (!isInsideDirectory(filePath, status.backupDir || backupDir)) {
+    throw httpError(403, "Arquivo de backup fora do diretorio permitido.");
   }
 
   const fileInfo = await stat(filePath).catch(() => null);
