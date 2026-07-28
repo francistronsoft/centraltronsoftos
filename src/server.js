@@ -22,7 +22,7 @@ const backupDir = process.env.CENTRAL_TRONSOFTOS_BACKUP_DIR || "/var/backups/cen
 const backupTimeoutMs = Number(process.env.CENTRAL_BACKUP_TIMEOUT_MS || 20 * 60 * 1000);
 const maxJobLogLength = 80_000;
 const maxMetricSeries = 288;
-const offlineAfterMinutes = Number(process.env.CENTRAL_OFFLINE_AFTER_MINUTES || 5);
+const offlineAfterMinutes = Number(process.env.CENTRAL_OFFLINE_AFTER_MINUTES || 15);
 const maintenanceJobs = new Map();
 
 const contentTypes = {
