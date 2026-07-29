@@ -1869,7 +1869,7 @@ function renderClientDetail(client) {
   const databaseSize = databaseSizeLabel(database);
   const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
   const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
-  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"], ["disk"]);
+  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"]);
   const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
   const cpuCores = host.cpuCores ?? host.processorCount ?? "-";
   const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
