@@ -830,6 +830,7 @@ function normalizedHostPayload(payload = {}, existing = null) {
   const latest = Array.isArray(systemMetrics.latest) ? systemMetrics.latest[0] : systemMetrics.latest;
   const latestRow = latest && typeof latest === "object" ? latest : {};
   const memory = systemMetrics.memory && typeof systemMetrics.memory === "object" ? systemMetrics.memory : {};
+  const disk = systemMetrics.disk && typeof systemMetrics.disk === "object" ? systemMetrics.disk : {};
   const previousHost = existing?.host && typeof existing.host === "object" ? existing.host : {};
 
   const cpuModel = host.cpuModel
@@ -859,8 +860,40 @@ function normalizedHostPayload(payload = {}, existing = null) {
     ?? memory.TotalBytes
     ?? previousHost.memoryTotalBytes
     ?? null;
+  const diskTotalBytes = host.diskTotalBytes
+    ?? host.storageTotalBytes
+    ?? latestRow.diskTotalBytes
+    ?? latestRow.storageTotalBytes
+    ?? systemMetrics.diskTotalBytes
+    ?? systemMetrics.storageTotalBytes
+    ?? disk.totalBytes
+    ?? disk.total
+    ?? previousHost.diskTotalBytes
+    ?? null;
+  const diskUsedBytes = host.diskUsedBytes
+    ?? host.storageUsedBytes
+    ?? latestRow.diskUsedBytes
+    ?? latestRow.storageUsedBytes
+    ?? systemMetrics.diskUsedBytes
+    ?? systemMetrics.storageUsedBytes
+    ?? disk.usedBytes
+    ?? disk.used
+    ?? previousHost.diskUsedBytes
+    ?? null;
+  const diskFreeBytes = host.diskFreeBytes
+    ?? host.storageFreeBytes
+    ?? latestRow.diskFreeBytes
+    ?? latestRow.storageFreeBytes
+    ?? systemMetrics.diskFreeBytes
+    ?? systemMetrics.storageFreeBytes
+    ?? disk.freeBytes
+    ?? disk.free
+    ?? previousHost.diskFreeBytes
+    ?? null;
 
   return {
+    ...previousHost,
+    ...host,
     hostname: host.hostname || previousHost.hostname || "",
     os: host.os || previousHost.os || "",
     architecture: host.architecture || host.arch || previousHost.architecture || "",
@@ -870,7 +903,13 @@ function normalizedHostPayload(payload = {}, existing = null) {
     cpuCores: Number.isFinite(Number(cpuCores)) ? Number(cpuCores) : null,
     processorCount: Number.isFinite(Number(cpuCores)) ? Number(cpuCores) : null,
     memoryTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null,
-    ramTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null
+    ramTotalBytes: Number.isFinite(Number(memoryTotalBytes)) ? Number(memoryTotalBytes) : null,
+    diskTotalBytes: Number.isFinite(Number(diskTotalBytes)) ? Number(diskTotalBytes) : null,
+    storageTotalBytes: Number.isFinite(Number(diskTotalBytes)) ? Number(diskTotalBytes) : null,
+    diskUsedBytes: Number.isFinite(Number(diskUsedBytes)) ? Number(diskUsedBytes) : null,
+    storageUsedBytes: Number.isFinite(Number(diskUsedBytes)) ? Number(diskUsedBytes) : null,
+    diskFreeBytes: Number.isFinite(Number(diskFreeBytes)) ? Number(diskFreeBytes) : null,
+    storageFreeBytes: Number.isFinite(Number(diskFreeBytes)) ? Number(diskFreeBytes) : null
   };
 }
 
@@ -962,6 +1001,9 @@ function latestSystemMetricRow(payload = {}, metrics = {}) {
   const cpuPercent = row.cpuPercent ?? systemMetrics.cpuPercent ?? metrics.cpuPercent ?? systemMetrics.cpu?.percent;
   const memoryPercent = row.memoryPercent ?? systemMetrics.memoryPercent ?? metrics.memoryPercent ?? systemMetrics.memory?.usedPercent;
   const diskUsedPercent = row.diskUsedPercent ?? systemMetrics.diskUsedPercent ?? metrics.diskUsedPercent ?? systemMetrics.disk?.percentUsed;
+  const diskTotalBytes = row.diskTotalBytes ?? systemMetrics.diskTotalBytes ?? metrics.diskTotalBytes ?? systemMetrics.disk?.totalBytes ?? systemMetrics.disk?.total ?? payload.host?.diskTotalBytes;
+  const diskUsedBytes = row.diskUsedBytes ?? systemMetrics.diskUsedBytes ?? metrics.diskUsedBytes ?? systemMetrics.disk?.usedBytes ?? systemMetrics.disk?.used ?? payload.host?.diskUsedBytes;
+  const diskFreeBytes = row.diskFreeBytes ?? systemMetrics.diskFreeBytes ?? metrics.diskFreeBytes ?? systemMetrics.disk?.freeBytes ?? systemMetrics.disk?.free ?? payload.host?.diskFreeBytes;
   const temperatureCelsius = row.temperatureCelsius
     ?? row.temperature
     ?? row.temperatureC
@@ -995,6 +1037,9 @@ function latestSystemMetricRow(payload = {}, metrics = {}) {
   if (Number.isFinite(Number(cpuPercent))) normalized.cpuPercent = Number(cpuPercent);
   if (Number.isFinite(Number(memoryPercent))) normalized.memoryPercent = Number(memoryPercent);
   if (Number.isFinite(Number(diskUsedPercent))) normalized.diskUsedPercent = Number(diskUsedPercent);
+  if (Number.isFinite(Number(diskTotalBytes))) normalized.diskTotalBytes = Number(diskTotalBytes);
+  if (Number.isFinite(Number(diskUsedBytes))) normalized.diskUsedBytes = Number(diskUsedBytes);
+  if (Number.isFinite(Number(diskFreeBytes))) normalized.diskFreeBytes = Number(diskFreeBytes);
   if (Number.isFinite(Number(temperatureCelsius))) normalized.temperatureCelsius = Number(temperatureCelsius);
   if (Number.isFinite(Number(hostUptimeSeconds))) normalized.hostUptimeSeconds = Number(hostUptimeSeconds);
   return Object.keys(normalized).length > 1 ? normalized : null;
@@ -1021,6 +1066,9 @@ function incomingMetrics(payload = {}, previousMetrics = {}) {
     next.cpuPercent = row.cpuPercent ?? next.cpuPercent ?? previousMetrics.cpuPercent;
     next.memoryPercent = row.memoryPercent ?? next.memoryPercent ?? previousMetrics.memoryPercent;
     next.diskUsedPercent = row.diskUsedPercent ?? next.diskUsedPercent ?? previousMetrics.diskUsedPercent;
+    next.diskTotalBytes = row.diskTotalBytes ?? next.diskTotalBytes ?? previousMetrics.diskTotalBytes;
+    next.diskUsedBytes = row.diskUsedBytes ?? next.diskUsedBytes ?? previousMetrics.diskUsedBytes;
+    next.diskFreeBytes = row.diskFreeBytes ?? next.diskFreeBytes ?? previousMetrics.diskFreeBytes;
     next.temperatureCelsius = row.temperatureCelsius ?? next.temperatureCelsius ?? previousMetrics.temperatureCelsius;
   }
   return next;
@@ -1832,7 +1880,7 @@ async function handleHeartbeat(request, response) {
   appendDatabaseHistory(installation);
   appendIndexAuditHistory(installation);
   resolveIndexAlertsIfHealthy(db, installation);
-  installation.host = { ...installation.host, ...payload.host };
+  installation.host = normalizedHostPayload(payload, installation);
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.backups = normalizeBackups({ ...(installation.backups || {}), ...(payload.backups || {}) });
   installation.metrics = incomingMetrics(payload, installation.metrics || {});

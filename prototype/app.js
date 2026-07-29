@@ -784,6 +784,54 @@ function diskPercent(installation) {
   ]);
 }
 
+function storageInfo(client) {
+  const metrics = client?.metrics || {};
+  const systemMetrics = metrics.systemMetrics || {};
+  const latest = Array.isArray(systemMetrics.latest) ? systemMetrics.latest[0] : systemMetrics.latest || {};
+  const latestSeries = Array.isArray(systemMetrics.series) ? systemMetrics.series.at(-1) || {} : {};
+  const source = { ...client, metrics, systemMetrics, latest, latestSeries };
+  const total = numberFromPaths(source, [
+    "host.diskTotalBytes",
+    "host.storageTotalBytes",
+    "metrics.systemMetrics.diskTotalBytes",
+    "metrics.systemMetrics.disk.totalBytes",
+    "metrics.systemMetrics.disk.total",
+    "metrics.diskTotalBytes",
+    "backups.disk.total",
+    "backups.disk.totalBytes",
+    "latest.diskTotalBytes",
+    "latestSeries.diskTotalBytes"
+  ]);
+  const used = numberFromPaths(source, [
+    "host.diskUsedBytes",
+    "host.storageUsedBytes",
+    "metrics.systemMetrics.diskUsedBytes",
+    "metrics.systemMetrics.disk.usedBytes",
+    "metrics.systemMetrics.disk.used",
+    "metrics.diskUsedBytes",
+    "backups.disk.used",
+    "backups.disk.usedBytes",
+    "latest.diskUsedBytes",
+    "latestSeries.diskUsedBytes"
+  ]);
+  const free = numberFromPaths(source, [
+    "host.diskFreeBytes",
+    "host.storageFreeBytes",
+    "metrics.systemMetrics.diskFreeBytes",
+    "metrics.systemMetrics.disk.freeBytes",
+    "metrics.systemMetrics.disk.free",
+    "metrics.diskFreeBytes",
+    "backups.disk.free",
+    "backups.disk.freeBytes",
+    "latest.diskFreeBytes",
+    "latestSeries.diskFreeBytes"
+  ]);
+  const percent = gaugeValue(client?.diskPercent ?? metrics.diskUsedPercent ?? latest.diskUsedPercent ?? latestSeries.diskUsedPercent ?? client?.backups?.disk?.percentUsed);
+  const inferredUsed = used ?? (total !== null && free !== null ? Math.max(0, total - free) : null);
+  const inferredFree = free ?? (total !== null && inferredUsed !== null ? Math.max(0, total - inferredUsed) : null);
+  return { total, used: inferredUsed, free: inferredFree, percent };
+}
+
 function temperatureValue(client) {
   const metrics = client?.metrics || {};
   const system = metrics.systemMetrics || {};
@@ -1705,7 +1753,7 @@ function metricSummary(points) {
   return { peak, latest };
 }
 
-function performanceLineChart(cpuValues, memoryValues) {
+function performanceLineChart(cpuValues, memoryValues, storage = {}) {
   const cpuPoints = cpuValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
   const memoryPoints = memoryValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
   const points = cpuPoints.length >= memoryPoints.length ? cpuPoints : memoryPoints;
@@ -1757,6 +1805,10 @@ function performanceLineChart(cpuValues, memoryValues) {
       <span>Pico CPU <strong>${escapeHtml(cpu ? `${cpu.peak.value.toFixed(1)}%` : "-")}</strong></span>
       <span>Memoria atual <strong>${escapeHtml(memory ? `${memory.latest.value.toFixed(1)}%` : "-")}</strong></span>
       <span>Pico memoria <strong>${escapeHtml(memory ? `${memory.peak.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>HD/SSD total <strong>${escapeHtml(bytesLabel(storage.total))}</strong></span>
+      <span>Em uso <strong>${escapeHtml(storage.used !== null ? bytesLabel(storage.used) : storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
+      <span>Livre <strong>${escapeHtml(bytesLabel(storage.free))}</strong></span>
+      <span>Uso disco <strong>${escapeHtml(storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
     </div>
   `;
 }
@@ -1813,6 +1865,7 @@ function renderClientDetail(client) {
   const cpuCores = host.cpuCores ?? host.processorCount ?? "-";
   const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
   const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
+  const storage = storageInfo(client);
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
@@ -1884,10 +1937,10 @@ function renderClientDetail(client) {
           <div class="ops-panel-head">
             <div>
               <h3>CPU / Memoria</h3>
-              <span>horarios de maior consumo</span>
+              <span>desempenho e armazenamento do servidor</span>
             </div>
           </div>
-          ${performanceLineChart(cpuSeries, memorySeries)}
+          ${performanceLineChart(cpuSeries, memorySeries, storage)}
         </article>
         <div class="temperature-card-wrap">${detailTemperaturePanel(client)}</div>
       </div>
