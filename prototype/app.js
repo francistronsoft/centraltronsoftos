@@ -1755,12 +1755,13 @@ function metricSummary(points) {
   return { peak, latest };
 }
 
-function performanceLineChart(cpuValues, memoryValues, storage = {}) {
+function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage = {}) {
   const cpuPoints = cpuValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
   const memoryPoints = memoryValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
-  const points = cpuPoints.length >= memoryPoints.length ? cpuPoints : memoryPoints;
-  if (!cpuPoints.length && !memoryPoints.length) {
-    return `<div class="metric-empty performance-empty">sem serie historica de CPU/memoria</div>`;
+  const diskPoints = diskValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
+  const points = [cpuPoints, memoryPoints, diskPoints].sort((a, b) => b.length - a.length)[0] || [];
+  if (!cpuPoints.length && !memoryPoints.length && !diskPoints.length) {
+    return `<div class="metric-empty performance-empty">sem serie historica de CPU/memoria/disco</div>`;
   }
 
   const width = 720;
@@ -1772,17 +1773,20 @@ function performanceLineChart(cpuValues, memoryValues, storage = {}) {
     : [];
   const cpuPath = metricLinePath(cpuPoints, width, height, padding);
   const memoryPath = metricLinePath(memoryPoints, width, height, padding);
+  const diskPath = metricLinePath(diskPoints, width, height, padding);
   const memoryArea = metricAreaPath(memoryPoints, width, height, padding);
   const cpu = cpuPoints.length ? metricSummary(cpuPoints) : null;
   const memory = memoryPoints.length ? metricSummary(memoryPoints) : null;
+  const disk = diskPoints.length ? metricSummary(diskPoints) : null;
 
   return `
     <div class="performance-chart">
       <div class="performance-legend">
         <span><i class="cpu"></i>CPU</span>
         <span><i class="memory"></i>Memoria</span>
+        <span><i class="disk"></i>Disco</span>
       </div>
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de CPU e memoria">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de CPU, memoria e disco">
         <defs>
           <linearGradient id="memory-area-gradient" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stop-color="#39c87a" stop-opacity="0.28" />
@@ -1799,6 +1803,7 @@ function performanceLineChart(cpuValues, memoryValues, storage = {}) {
         }).join("")}
         ${memoryArea ? `<path class="chart-area memory" d="${memoryArea}"></path>` : ""}
         ${memoryPath ? `<path class="chart-line memory" d="${memoryPath}"></path>` : ""}
+        ${diskPath ? `<path class="chart-line disk" d="${diskPath}"></path>` : ""}
         ${cpuPath ? `<path class="chart-line cpu" d="${cpuPath}"></path>` : ""}
       </svg>
     </div>
@@ -1807,10 +1812,11 @@ function performanceLineChart(cpuValues, memoryValues, storage = {}) {
       <span>Pico CPU <strong>${escapeHtml(cpu ? `${cpu.peak.value.toFixed(1)}%` : "-")}</strong></span>
       <span>Memoria atual <strong>${escapeHtml(memory ? `${memory.latest.value.toFixed(1)}%` : "-")}</strong></span>
       <span>Pico memoria <strong>${escapeHtml(memory ? `${memory.peak.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Disco atual <strong>${escapeHtml(disk ? `${disk.latest.value.toFixed(1)}%` : storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
+      <span>Pico disco <strong>${escapeHtml(disk ? `${disk.peak.value.toFixed(1)}%` : "-")}</strong></span>
       <span>HD/SSD total <strong>${escapeHtml(bytesLabel(storage.total))}</strong></span>
       <span>Em uso <strong>${escapeHtml(storage.used !== null ? bytesLabel(storage.used) : storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
       <span>Livre <strong>${escapeHtml(bytesLabel(storage.free))}</strong></span>
-      <span>Uso disco <strong>${escapeHtml(storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
     </div>
   `;
 }
@@ -1863,6 +1869,7 @@ function renderClientDetail(client) {
   const databaseSize = databaseSizeLabel(database);
   const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
   const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
+  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"], ["disk"]);
   const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
   const cpuCores = host.cpuCores ?? host.processorCount ?? "-";
   const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
@@ -1942,7 +1949,7 @@ function renderClientDetail(client) {
               <span>desempenho e armazenamento do servidor</span>
             </div>
           </div>
-          ${performanceLineChart(cpuSeries, memorySeries, storage)}
+          ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
         </article>
         <div class="temperature-card-wrap">${detailTemperaturePanel(client)}</div>
       </div>

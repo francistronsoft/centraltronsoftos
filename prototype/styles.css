@@ -1637,6 +1637,10 @@ tr.clickable-row:hover,
   background: #39c87a;
 }
 
+.performance-legend .disk {
+  background: #3b82f6;
+}
+
 .performance-chart svg {
   width: 100%;
   min-height: 220px;
@@ -1681,6 +1685,10 @@ tr.clickable-row:hover,
 
 .chart-line.memory {
   stroke: #39c87a;
+}
+
+.chart-line.disk {
+  stroke: #3b82f6;
 }
 
 .performance-stats {
