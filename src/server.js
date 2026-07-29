@@ -1513,6 +1513,38 @@ async function handleOAuthStatus(request, response) {
   sendJson(response, 200, publicOAuthStatus(db, installation, request));
 }
 
+async function handleOAuthReset(request, response) {
+  const db = await readDb();
+  const installation = findInstallationByToken(db, request);
+  const now = nowIso();
+  let revoked = 0;
+  for (const credential of db.oauthCredentials || []) {
+    if (credential.provider === "google"
+      && credential.installationId === installation.installationId
+      && credential.status === "connected") {
+      credential.status = "revoked";
+      credential.revokedAt = credential.revokedAt || now;
+      credential.updatedAt = now;
+      revoked += 1;
+    }
+  }
+  for (const state of db.oauthStates || []) {
+    if (state.provider === "google"
+      && state.installationId === installation.installationId
+      && state.status === "pending") {
+      state.status = "revoked";
+      state.revokedAt = state.revokedAt || now;
+    }
+  }
+  db.oauthEvents.push({ id: randomUUID(), type: "google_reset", installationId: installation.installationId, revoked, createdAt: now });
+  await writeDb(db);
+  sendJson(response, 200, {
+    ok: true,
+    revoked,
+    ...publicOAuthStatus(db, installation, request)
+  });
+}
+
 async function handleOAuthStart(request, response) {
   const config = requireGoogleOAuthConfig(request);
   const payload = await readJson(request);
@@ -1997,6 +2029,11 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/tronsoftos/oauth/google/start") {
     await handleOAuthStart(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/tronsoftos/oauth/google/reset") {
+    await handleOAuthReset(request, response);
     return;
   }
 
