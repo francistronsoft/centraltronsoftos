@@ -855,6 +855,46 @@ function backupSummary(installation) {
   return { label: `Backup atrasado ${backupAgeLabel(minutes)}`, tone: "warning", detail: formatDateTime(latest) };
 }
 
+function backupFileTimestamp(file) {
+  const time = file?.modifiedAt ? new Date(file.modifiedAt).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isBackupPayloadFile(file) {
+  return /\.(gbk|fbk|gbk\.gz|fbk\.gz)$/i.test(file?.name || file?.path || "");
+}
+
+function isBackupManifestFile(file) {
+  return /\.manifest\.json$/i.test(file?.name || file?.path || "");
+}
+
+function backupFileKey(file) {
+  return String(file?.path || file?.name || "").replace(/^.*\//, "").replace(/\.manifest\.json$/i, "");
+}
+
+function latestRawBackupFile(backups = {}) {
+  const files = Array.isArray(backups.recentFiles) ? backups.recentFiles : [];
+  const latest = backups.latestFile && isBackupPayloadFile(backups.latestFile)
+    ? backups.latestFile
+    : files.filter(isBackupPayloadFile).sort((a, b) => backupFileTimestamp(b) - backupFileTimestamp(a))[0];
+  return latest || null;
+}
+
+function backupPanelLabel(client, backups = {}) {
+  const label = client?.backup?.label || "--";
+  const latestRaw = latestRawBackupFile(backups);
+  const rawTime = backupFileTimestamp(latestRaw);
+  const validatedTime = backups.latestValidatedBackupAt
+    ? new Date(backups.latestValidatedBackupAt).getTime()
+    : backups.latestManifest?.validationOk && backups.latestManifest?.backupFinishedAt
+      ? new Date(backups.latestManifest.backupFinishedAt).getTime()
+      : 0;
+  if (rawTime && (!validatedTime || rawTime > validatedTime + 60_000)) {
+    return `${label} | arquivo recente sem validacao ${formatRelativeTime(latestRaw.modifiedAt)}`;
+  }
+  return label;
+}
+
 function monitorStatus(client) {
   if (client.status === "offline") return "offline";
   const alert = latestOpenAlertForClient(client.id);
@@ -1725,10 +1765,12 @@ function renderBackupFiles(files = []) {
   if (!Array.isArray(files) || files.length === 0) {
     return `<p class="empty-note">Nenhum arquivo de backup recente informado.</p>`;
   }
+  const manifests = new Set(files.filter(isBackupManifestFile).map(backupFileKey));
   return files.slice(0, 6).map((file) => `
-    <article class="detail-list-item">
+    <article class="detail-list-item ${isBackupPayloadFile(file) && !manifests.has(backupFileKey(file)) ? "warning" : ""}">
       <strong>${escapeHtml(file.name || file.path || "Backup")}</strong>
       <span>${escapeHtml(file.modifiedAt ? formatRelativeTime(file.modifiedAt) : "-")} ${file.size ? `- ${escapeHtml(bytesLabel(file.size))}` : ""}</span>
+      <small>${escapeHtml(isBackupManifestFile(file) ? "manifesto de validacao" : manifests.has(backupFileKey(file)) ? "backup validado" : "aguardando validacao")}</small>
     </article>
   `).join("");
 }
@@ -1881,7 +1923,7 @@ function renderClientDetail(client) {
 
     <section class="ops-grid">
       <article class="ops-panel">
-        <div class="ops-panel-head"><h3>Backups recentes</h3><span>${escapeHtml(client.backup.label)}</span></div>
+        <div class="ops-panel-head"><h3>Backups recentes</h3><span>${escapeHtml(backupPanelLabel(client, backups))}</span></div>
         <div class="detail-list">${renderBackupFiles(backups.recentFiles)}</div>
       </article>
 
