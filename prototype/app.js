@@ -1503,10 +1503,12 @@ function quotaGaugeValue(quota = {}) {
 
 function quotaGaugeCaption(quota = {}, googleDrive = {}) {
   if (quota?.ok === false) return quota.error || "falha ao consultar quota";
-  if (googleDrive?.accountEmail) return googleDrive.accountEmail;
+  const account = googleDrive?.accountEmail || "";
   if (Number.isFinite(Number(quota?.free)) && Number.isFinite(Number(quota?.total))) {
-    return `${bytesLabel(Number(quota.free))} livres de ${bytesLabel(Number(quota.total))}`;
+    const checkedAt = quota?.checkedAt ? ` | ${formatRelativeTime(quota.checkedAt)}` : "";
+    return `${account ? `${account} | ` : ""}conta Google: ${bytesLabel(Number(quota.free))} livres de ${bytesLabel(Number(quota.total))}${checkedAt}`;
   }
+  if (account) return `${account} | quota da conta Google`;
   return "quota remota";
 }
 
