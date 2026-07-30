@@ -1758,7 +1758,12 @@ function metricSummary(points) {
 function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage = {}) {
   const cpuPoints = cpuValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
   const memoryPoints = memoryValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
-  const diskPoints = diskValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
+  let diskPoints = diskValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
+  const basePoints = [cpuPoints, memoryPoints, diskPoints].sort((a, b) => b.length - a.length)[0] || [];
+  if (!diskPoints.length && storage.percent !== null && Number.isFinite(Number(storage.percent))) {
+    const fallbackPoints = basePoints.length ? basePoints : [{ label: "leitura atual" }, { label: "leitura atual" }];
+    diskPoints = fallbackPoints.map((point) => ({ label: point.label || "leitura atual", value: Number(storage.percent) }));
+  }
   const points = [cpuPoints, memoryPoints, diskPoints].sort((a, b) => b.length - a.length)[0] || [];
   if (!cpuPoints.length && !memoryPoints.length && !diskPoints.length) {
     return `<div class="metric-empty performance-empty">sem serie historica de CPU/memoria/disco</div>`;
