@@ -13,7 +13,20 @@ const port = Number(process.env.PORT || 3080);
 const sessionCookie = "central_session";
 const sessionMaxAgeSeconds = 12 * 60 * 60;
 const tronsoftRole = "tronsoft_admin";
+const tronsoftUserRole = "tronsoft_user";
 const resellerRole = "reseller_user";
+const permissions = {
+  viewMonitor: "view_monitor",
+  viewAllClients: "view_all_clients",
+  manageClients: "manage_clients",
+  generateTokens: "generate_tokens",
+  manageResellers: "manage_resellers",
+  manageUsers: "manage_users",
+  maintenance: "maintenance"
+};
+const allPermissions = Object.values(permissions);
+const tronsoftDefaultPermissions = [permissions.viewMonitor, permissions.viewAllClients];
+const resellerDefaultPermissions = [permissions.viewMonitor, permissions.manageClients, permissions.generateTokens];
 const googleDriveScope = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 const updateCommand = process.env.CENTRAL_UPDATE_COMMAND || "/usr/local/sbin/central-tronsoftos-update";
 const updateTimeoutMs = Number(process.env.CENTRAL_UPDATE_TIMEOUT_MS || 15 * 60 * 1000);
@@ -410,14 +423,74 @@ function verifyPassword(password, stored) {
 
 function publicUser(user) {
   if (!user) return null;
+  const effectivePermissions = userPermissions(user);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
     resellerId: user.resellerId || null,
-    status: user.status
+    allowedResellerIds: allowedResellerIds(user),
+    status: user.status,
+    permissions: Array.isArray(user.permissions) ? user.permissions.filter((item) => allPermissions.includes(item)) : [],
+    effectivePermissions
   };
+}
+
+function isTronsoftUser(user) {
+  return user?.role === tronsoftRole || user?.role === tronsoftUserRole;
+}
+
+function userPermissions(user) {
+  if (!user) return [];
+  if (user.role === tronsoftRole) return allPermissions;
+  const hasSavedPermissions = Object.prototype.hasOwnProperty.call(user, "permissions");
+  const saved = Array.isArray(user.permissions) ? sanitizePermissions(user.permissions) : [];
+  if (hasSavedPermissions) return saved;
+  if (user.role === resellerRole) return resellerDefaultPermissions;
+  if (user.role === tronsoftUserRole) return tronsoftDefaultPermissions;
+  return saved;
+}
+
+function hasPermission(user, permission) {
+  return userPermissions(user).includes(permission);
+}
+
+function requirePermission(user, permission, message = "Permissao insuficiente.") {
+  if (!hasPermission(user, permission)) {
+    throw httpError(403, message);
+  }
+}
+
+function sanitizePermissions(input = []) {
+  return Array.isArray(input)
+    ? [...new Set(input.map((item) => String(item || "").trim()).filter((item) => allPermissions.includes(item)))]
+    : [];
+}
+
+function sanitizeAllowedResellerIds(input = [], db) {
+  const validIds = new Set((db.resellers || []).map((reseller) => reseller.id));
+  return Array.isArray(input)
+    ? [...new Set(input.map((item) => String(item || "").trim()).filter((item) => validIds.has(item)))]
+    : [];
+}
+
+function allowedResellerIds(user) {
+  const explicit = Array.isArray(user?.allowedResellerIds)
+    ? user.allowedResellerIds.filter(Boolean)
+    : [];
+  if (user?.resellerId && !explicit.includes(user.resellerId)) {
+    explicit.push(user.resellerId);
+  }
+  return [...new Set(explicit)];
+}
+
+function userCanAccessReseller(user, resellerId) {
+  if (!resellerId) return false;
+  if (user?.role === tronsoftRole) return true;
+  const allowed = allowedResellerIds(user);
+  if (allowed.includes(resellerId)) return true;
+  return hasPermission(user, permissions.viewAllClients) && allowed.length === 0;
 }
 
 function publicReseller(reseller, db) {
@@ -502,13 +575,21 @@ function requireTronsoft(user) {
 }
 
 function scopedClients(db, user, resellerId = "") {
-  if (user.role === resellerRole) {
-    return db.clients.filter((client) => client.resellerId === user.resellerId);
+  requirePermission(user, permissions.viewMonitor, "Sem permissao para monitorar ambientes.");
+  if (user.role === tronsoftRole) {
+    return resellerId
+      ? db.clients.filter((client) => client.resellerId === resellerId)
+      : db.clients;
   }
+  const allowed = allowedResellerIds(user);
   if (resellerId) {
+    if (!userCanAccessReseller(user, resellerId)) return [];
     return db.clients.filter((client) => client.resellerId === resellerId);
   }
-  return db.clients;
+  if (hasPermission(user, permissions.viewAllClients) && allowed.length === 0) {
+    return db.clients;
+  }
+  return db.clients.filter((client) => allowed.includes(client.resellerId));
 }
 
 function scopedInstallations(db, user, resellerId = "") {
@@ -526,8 +607,8 @@ function requireClientAccess(db, user, clientId) {
   if (!client) {
     throw httpError(404, "Cliente nao encontrado.");
   }
-  if (user.role === resellerRole && client.resellerId !== user.resellerId) {
-    throw httpError(403, "Cliente fora do escopo da revenda.");
+  if (!userCanAccessReseller(user, client.resellerId)) {
+    throw httpError(403, "Cliente fora do escopo do usuario.");
   }
   return client;
 }
@@ -1379,11 +1460,34 @@ async function handleCreateClient(request, response) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
-  const reseller = user.role === resellerRole
-    ? db.resellers.find((item) => item.id === user.resellerId)
-    : findOrCreateReseller(db, payload.reseller?.directTronsoft ? directTronsoftResellerPayload() : payload.reseller);
+  requirePermission(user, permissions.manageClients, "Sem permissao para cadastrar clientes.");
+  const requestedResellerId = String(payload.resellerId || "").trim();
+  let reseller = requestedResellerId
+    ? db.resellers.find((item) => item.id === requestedResellerId)
+    : null;
+  if (!reseller && user.role === resellerRole) {
+    reseller = db.resellers.find((item) => item.id === user.resellerId);
+  }
+  if (!reseller && payload.reseller?.directTronsoft) {
+    requirePermission(user, permissions.manageResellers, "Sem permissao para cadastrar revendas.");
+    reseller = findOrCreateReseller(db, directTronsoftResellerPayload());
+  }
+  if (!reseller && payload.reseller) {
+    const normalizedDocument = normalizeDocument(payload.reseller.document, "reseller.document");
+    reseller = db.resellers.find((item) => {
+      return (normalizedDocument && item.document === normalizedDocument)
+        || item.name.toLowerCase() === requireText(payload.reseller.name, "reseller.name").toLowerCase();
+    }) || null;
+    if (!reseller) {
+      requirePermission(user, permissions.manageResellers, "Sem permissao para cadastrar revendas.");
+      reseller = findOrCreateReseller(db, payload.reseller);
+    }
+  }
   if (!reseller) {
     throw httpError(400, "Revenda do usuario nao encontrada.");
+  }
+  if (!userCanAccessReseller(user, reseller.id)) {
+    throw httpError(403, "Revenda fora do escopo do usuario.");
   }
   const client = findOrCreateClient(db, reseller, payload.customer);
   const token = {
@@ -1411,15 +1515,19 @@ async function handleUpdateClient(request, response, clientId) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
+  requirePermission(user, permissions.manageClients, "Sem permissao para editar clientes.");
   const client = requireClientAccess(db, user, clientId);
 
   const name = requireText(payload.name, "name");
   const document = normalizeDocument(payload.document, "document");
   let targetResellerId = client.resellerId;
-  if (user.role === tronsoftRole && payload.resellerId !== undefined) {
+  if (payload.resellerId !== undefined) {
     targetResellerId = requireText(payload.resellerId, "resellerId");
     if (!db.resellers.some((reseller) => reseller.id === targetResellerId)) {
       throw httpError(400, "Revenda informada nao encontrada.");
+    }
+    if (!userCanAccessReseller(user, targetResellerId)) {
+      throw httpError(403, "Revenda fora do escopo do usuario.");
     }
   }
   if (document) {
@@ -1449,6 +1557,7 @@ async function handleSetClientStatus(request, response, clientId) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
+  requirePermission(user, permissions.manageClients, "Sem permissao para alterar clientes.");
   const client = requireClientAccess(db, user, clientId);
   const status = String(payload.status || "").trim().toLowerCase();
   if (!["active", "inactive"].includes(status)) {
@@ -1465,6 +1574,7 @@ async function handleSetClientStatus(request, response, clientId) {
 async function handleResetClientToken(request, response, clientId) {
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
+  requirePermission(user, permissions.generateTokens, "Sem permissao para gerar tokens.");
   const client = requireClientAccess(db, user, clientId);
   const now = nowIso();
   db.pairingTokens
@@ -1516,6 +1626,7 @@ async function handleDeleteClient(request, response, clientId) {
 async function handleUnpairInstallation(request, response, installationId) {
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
+  requirePermission(user, permissions.generateTokens, "Sem permissao para desvincular ambientes.");
   const installation = requireInstallationAccess(db, user, installationId);
   const now = nowIso();
   db.pairingTokens
@@ -1543,7 +1654,7 @@ async function handleCreateReseller(request, response) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
-  requireTronsoft(user);
+  requirePermission(user, permissions.manageResellers, "Sem permissao para cadastrar revendas.");
   const resellerPayload = payload.reseller || payload;
   const reseller = findOrCreateReseller(db, resellerPayload);
   if (!reseller.document) {
@@ -1746,11 +1857,26 @@ async function handleCreateUser(request, response) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const currentUser = requireUser(db, request);
-  requireTronsoft(currentUser);
-  const role = payload.role === resellerRole ? resellerRole : tronsoftRole;
+  requirePermission(currentUser, permissions.manageUsers, "Sem permissao para cadastrar usuarios.");
+  const allowedRoles = new Set([resellerRole, tronsoftUserRole, tronsoftRole]);
+  const role = allowedRoles.has(payload.role) ? payload.role : resellerRole;
+  if (role === tronsoftRole && currentUser.role !== tronsoftRole) {
+    throw httpError(403, "Apenas administrador TronSoft pode criar outro administrador.");
+  }
   const resellerId = role === resellerRole ? requireText(payload.resellerId, "resellerId") : null;
   if (resellerId && !db.resellers.some((reseller) => reseller.id === resellerId)) {
     throw httpError(400, "Revenda nao encontrada.");
+  }
+  const allowedResellers = sanitizeAllowedResellerIds(payload.allowedResellerIds, db);
+  if (resellerId && !allowedResellers.includes(resellerId)) {
+    allowedResellers.push(resellerId);
+  }
+  const userAllowedResellers = allowedResellerIds(currentUser);
+  if (currentUser.role !== tronsoftRole && !hasPermission(currentUser, permissions.viewAllClients)) {
+    const outsideScope = allowedResellers.length === 0 || allowedResellers.some((id) => !userAllowedResellers.includes(id));
+    if (outsideScope) {
+      throw httpError(403, "Revenda fora do escopo do usuario.");
+    }
   }
   const email = requireText(payload.email, "email").toLowerCase();
   if (db.users.some((user) => user.email.toLowerCase() === email)) {
@@ -1758,6 +1884,14 @@ async function handleCreateUser(request, response) {
   }
   const providedPassword = payload.password?.trim();
   const password = providedPassword || generateTemporaryPassword();
+  const requestedPermissions = sanitizePermissions(payload.permissions);
+  if (currentUser.role !== tronsoftRole) {
+    const currentPermissions = new Set(userPermissions(currentUser));
+    const forbiddenPermission = requestedPermissions.find((permission) => !currentPermissions.has(permission));
+    if (forbiddenPermission) {
+      throw httpError(403, "Nao e permitido conceder permissao fora do seu proprio perfil.");
+    }
+  }
   const user = {
     id: randomUUID(),
     name: requireText(payload.name, "name"),
@@ -1765,6 +1899,8 @@ async function handleCreateUser(request, response) {
     passwordHash: hashPassword(password),
     role,
     resellerId,
+    allowedResellerIds: role === tronsoftRole ? [] : allowedResellers,
+    permissions: role === tronsoftRole ? [] : requestedPermissions,
     status: "active",
     createdAt: nowIso(),
     updatedAt: nowIso()
@@ -1808,9 +1944,12 @@ async function handleSetUserPassword(request, response, userId) {
   const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const currentUser = requireUser(db, request);
-  requireTronsoft(currentUser);
+  requirePermission(currentUser, permissions.manageUsers, "Sem permissao para alterar usuarios.");
   const user = db.users.find((item) => item.id === userId);
   if (!user) throw httpError(404, "Usuario nao encontrado.");
+  if (user.role === tronsoftRole && currentUser.role !== tronsoftRole) {
+    throw httpError(403, "Apenas administrador TronSoft pode alterar outro administrador.");
+  }
   const providedPassword = payload.password?.trim();
   const password = providedPassword || generateTemporaryPassword();
   if (password.length < 6) {
@@ -2092,30 +2231,41 @@ async function handleApi(request, response, pathname) {
 
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
-  const resellerId = user.role === tronsoftRole ? url.searchParams.get("resellerId") || "" : "";
+  const resellerId = userCanAccessReseller(user, url.searchParams.get("resellerId") || "")
+    ? url.searchParams.get("resellerId") || ""
+    : "";
 
   if (request.method === "GET" && pathname === "/api/dashboard") {
-    const clients = scopedClients(db, user, resellerId);
+    const visibleClients = scopedClients(db, user, resellerId);
     const installations = scopedInstallations(db, user, resellerId);
     const alerts = scopedAlerts(db, user, resellerId);
-    const resellers = user.role === tronsoftRole
-      ? (resellerId ? db.resellers.filter((reseller) => reseller.id === resellerId) : db.resellers)
-      : db.resellers.filter((reseller) => reseller.id === user.resellerId);
-    sendJson(response, 200, dashboard({ ...db, resellers, clients, installations, alerts }));
+    const visibleResellerIds = new Set(visibleClients.map((client) => client.resellerId));
+    const resellers = db.resellers.filter((reseller) => visibleResellerIds.has(reseller.id));
+    sendJson(response, 200, dashboard({ ...db, resellers, clients: visibleClients, installations, alerts }));
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/resellers") {
-    const resellers = user.role === tronsoftRole
+    const resellers = hasPermission(user, permissions.viewAllClients) && allowedResellerIds(user).length === 0
       ? db.resellers
-      : db.resellers.filter((reseller) => reseller.id === user.resellerId);
+      : db.resellers.filter((reseller) => allowedResellerIds(user).includes(reseller.id));
     sendJson(response, 200, resellers.map((reseller) => publicReseller(reseller, db)));
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/users") {
-    requireTronsoft(user);
-    sendJson(response, 200, db.users.map(publicUser));
+    requirePermission(user, permissions.manageUsers, "Acesso restrito a usuarios.");
+    if (user.role === tronsoftRole) {
+      sendJson(response, 200, db.users.map(publicUser));
+      return;
+    }
+    const scope = new Set(allowedResellerIds(user));
+    sendJson(response, 200, db.users.filter((item) => {
+      if (item.id === user.id) return true;
+      if (item.role === tronsoftRole) return false;
+      const itemScope = allowedResellerIds(item);
+      return itemScope.some((id) => scope.has(id));
+    }).map(publicUser));
     return;
   }
 
@@ -2146,7 +2296,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "POST" && pathname === "/api/maintenance/update") {
-    requireTronsoft(user);
+    requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
     sendJson(response, 202, {
       ok: true,
       job: startMaintenanceUpdateJob()
@@ -2155,7 +2305,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "POST" && pathname === "/api/maintenance/backup") {
-    requireTronsoft(user);
+    requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
     sendJson(response, 202, {
       ok: true,
       job: startMaintenanceBackupJob()
@@ -2164,20 +2314,20 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname === "/api/maintenance/backup/status") {
-    requireTronsoft(user);
+    requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
     sendJson(response, 200, await backupStatus());
     return;
   }
 
   if (request.method === "GET" && pathname === "/api/maintenance/backup/download") {
-    requireTronsoft(user);
+    requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
     await downloadLatestBackup(response);
     return;
   }
 
   const maintenanceJobMatch = pathname.match(/^\/api\/maintenance\/jobs\/([^/]+)$/);
   if (request.method === "GET" && maintenanceJobMatch) {
-    requireTronsoft(user);
+    requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
     const job = maintenanceJobs.get(maintenanceJobMatch[1]);
     if (!job) throw httpError(404, "Execucao de manutencao nao encontrada.");
     sendJson(response, 200, publicMaintenanceJob(job));

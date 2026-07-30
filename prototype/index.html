@@ -207,9 +207,24 @@
               <input name="email" type="email" placeholder="Email de acesso" required>
               <select name="role" id="user-role-select">
                 <option value="reseller_user">Revenda</option>
-                <option value="tronsoft_admin">TronSoft</option>
+                <option value="tronsoft_user">TronSoft tecnico</option>
+                <option value="tronsoft_admin">TronSoft admin</option>
               </select>
               <select name="resellerId" id="user-reseller-select" required></select>
+              <div id="user-access-panel" class="access-panel">
+                <div>
+                  <strong>Revendas liberadas</strong>
+                  <span>Use Ctrl ou Shift para selecionar mais de uma revenda.</span>
+                </div>
+                <select name="allowedResellerIds" id="user-allowed-resellers" multiple></select>
+              </div>
+              <div id="user-permissions-panel" class="access-panel">
+                <div>
+                  <strong>Permissoes da Central</strong>
+                  <span>Defina quais areas e acoes este usuario pode usar.</span>
+                </div>
+                <div class="permission-grid" id="user-permissions-grid"></div>
+              </div>
               <input name="password" type="text" placeholder="Senha inicial ou deixe em branco">
               <label class="check-row">
                 <input name="sendEmail" type="checkbox">
@@ -431,13 +446,13 @@
           </div>
           <div class="modal-actions">
             <button id="client-edit-cancel" class="secondary-button" type="button">Cancelar</button>
-            <button class="primary-button" type="submit">Salvar alteracoes</button>
+            <button id="client-edit-save" class="primary-button" type="submit">Salvar alteracoes</button>
           </div>
         </form>
       </section>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260724-index-history"></script>
+    <script src="app.js?v=20260730-user-permissions"></script>
   </body>
 </html>

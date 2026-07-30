@@ -36,6 +36,25 @@ const clientsPageSize = 10;
 const environmentPageSize = 10;
 const dashboardRefreshIntervalMs = 30_000;
 const themeKey = "central-theme";
+const permissions = {
+  viewMonitor: "view_monitor",
+  viewAllClients: "view_all_clients",
+  manageClients: "manage_clients",
+  generateTokens: "generate_tokens",
+  manageResellers: "manage_resellers",
+  manageUsers: "manage_users",
+  maintenance: "maintenance"
+};
+
+const permissionLabels = {
+  [permissions.viewMonitor]: "Monitorar ambientes",
+  [permissions.viewAllClients]: "Ver todas as revendas",
+  [permissions.manageClients]: "Cadastrar e editar clientes",
+  [permissions.generateTokens]: "Gerar tokens e desvincular ambientes",
+  [permissions.manageResellers]: "Cadastrar revendas",
+  [permissions.manageUsers]: "Cadastrar usuarios",
+  [permissions.maintenance]: "Manutencao da Central"
+};
 
 const viewTitles = {
   dashboard: "Monitoramento geral",
@@ -56,6 +75,24 @@ const directTronsoftOption = {
   document: "TRONSOFT-DIRETO",
   directTronsoft: true
 };
+
+function effectivePermissionSet() {
+  return new Set(currentUser?.effectivePermissions || currentUser?.permissions || []);
+}
+
+function can(permission) {
+  return currentUser?.role === "tronsoft_admin" || effectivePermissionSet().has(permission);
+}
+
+function hasGlobalClientScope() {
+  return currentUser?.role === "tronsoft_admin" || can(permissions.viewAllClients);
+}
+
+function roleLabel(role) {
+  if (role === "tronsoft_admin") return "TronSoft admin";
+  if (role === "tronsoft_user") return "TronSoft tecnico";
+  return "Revenda";
+}
 
 const severityLabels = {
   critical: "Critico",
@@ -351,9 +388,19 @@ function showApp() {
 }
 
 function showView(view) {
-  const tronsoft = currentUser?.role === "tronsoft_admin";
-  const restrictedViews = new Set(["resellers", "users", "maintenance"]);
-  activeView = !tronsoft && restrictedViews.has(view) ? "clients" : view;
+  const allowedViews = {
+    dashboard: can(permissions.viewMonitor),
+    environments: can(permissions.viewMonitor),
+    alerts: can(permissions.viewMonitor),
+    oauth: can(permissions.viewMonitor),
+    clients: can(permissions.manageClients),
+    resellers: can(permissions.manageResellers),
+    users: can(permissions.manageUsers),
+    maintenance: can(permissions.maintenance),
+    account: true,
+    "client-detail": can(permissions.viewMonitor)
+  };
+  activeView = allowedViews[view] ? view : (can(permissions.viewMonitor) ? "dashboard" : "account");
 
   document.querySelectorAll("[data-view]").forEach((section) => {
     section.hidden = section.dataset.view !== activeView;
@@ -382,7 +429,8 @@ async function loadSession() {
     currentUser = payload.user;
     showApp();
     await configureScopeControls();
-    await loadCentralData();
+    if (can(permissions.viewMonitor)) await loadCentralData();
+    else await ensureActiveViewData();
   } catch {
     showLogin();
   }
@@ -406,7 +454,8 @@ async function login(event) {
     currentUser = payload.user;
     showApp();
     await configureScopeControls();
-    await loadCentralData();
+    if (can(permissions.viewMonitor)) await loadCentralData();
+    else await ensureActiveViewData();
   } catch (err) {
     error.textContent = err.message;
   }
@@ -419,10 +468,10 @@ async function logout() {
 }
 
 async function configureScopeControls() {
-  document.querySelector("#user-badge").textContent = `${currentUser.name} (${currentUser.role === "tronsoft_admin" ? "TronSoft" : "Revenda"})`;
-  document.querySelector("#scope-label").textContent = currentUser.role === "tronsoft_admin"
-    ? "Painel TronSoft com todos os clientes e filtro por revenda."
-    : "Painel da revenda com apenas seus clientes TronSoftOS.";
+  document.querySelector("#user-badge").textContent = `${currentUser.name} (${roleLabel(currentUser.role)})`;
+  document.querySelector("#scope-label").textContent = hasGlobalClientScope()
+    ? "Painel com clientes autorizados e filtro por revenda."
+    : "Painel com apenas as revendas liberadas para este usuario.";
 
   currentResellers = await api("/api/resellers");
   const filter = document.querySelector("#reseller-filter");
@@ -435,12 +484,15 @@ async function configureScopeControls() {
   const registrationsGroup = document.querySelector('[data-nav-group="registrations"]');
   const maintenanceNav = document.querySelector('[data-view-target="maintenance"]');
   const userResellerSelect = document.querySelector("#user-reseller-select");
+  const userAllowedResellers = document.querySelector("#user-allowed-resellers");
+  const refreshButton = document.querySelector("#refresh-button");
+  const adminRoleOption = document.querySelector('#user-role-select option[value="tronsoft_admin"]');
 
   filter.innerHTML = `<option value="">Todas as revendas</option>${currentResellers
     .map((reseller) => `<option value="${reseller.id}">${escapeHtml(reseller.name)}</option>`)
     .join("")}`;
   const clientResellerOptions = [
-    directTronsoftOption,
+    ...(can(permissions.manageResellers) ? [directTronsoftOption] : []),
     ...currentResellers.filter((reseller) => {
       return reseller.document !== directTronsoftOption.document && reseller.name.toLowerCase() !== "tronsoft";
     })
@@ -452,30 +504,44 @@ async function configureScopeControls() {
     .filter((reseller) => reseller.document !== directTronsoftOption.document && reseller.name.toLowerCase() !== "tronsoft")
     .map((reseller) => `<option value="${reseller.id}">${escapeHtml(reseller.name)}</option>`)
     .join("");
+  userAllowedResellers.innerHTML = currentResellers
+    .filter((reseller) => reseller.document !== directTronsoftOption.document && reseller.name.toLowerCase() !== "tronsoft")
+    .map((reseller) => `<option value="${reseller.id}">${escapeHtml(reseller.name)}</option>`)
+    .join("");
+  renderPermissionOptions();
 
-  const tronsoft = currentUser.role === "tronsoft_admin";
-  filter.hidden = !tronsoft;
-  resellerPanel.hidden = !tronsoft;
-  resellersNav.hidden = !tronsoft;
-  usersNav.hidden = !tronsoft;
-  registrationsGroup.hidden = false;
-  maintenanceNav.hidden = !tronsoft;
-  clientResellerSelect.hidden = !tronsoft;
-  resellerNameInput.hidden = tronsoft;
-  resellerDocumentInput.hidden = tronsoft;
-  resellerNameInput.required = !tronsoft;
-  clientResellerSelect.required = tronsoft;
+  const canManageClients = can(permissions.manageClients);
+  filter.hidden = !hasGlobalClientScope() && currentResellers.length <= 1;
+  resellerPanel.hidden = !can(permissions.manageResellers);
+  resellersNav.hidden = !can(permissions.manageResellers);
+  usersNav.hidden = !can(permissions.manageUsers);
+  registrationsGroup.hidden = !(canManageClients || can(permissions.manageResellers) || can(permissions.manageUsers));
+  maintenanceNav.hidden = !can(permissions.maintenance);
+  document.querySelector('[data-view-target="clients"]').hidden = !canManageClients;
+  document.querySelector('[data-view-target="dashboard"]').hidden = !can(permissions.viewMonitor);
+  document.querySelector('[data-view-target="environments"]').hidden = !can(permissions.viewMonitor);
+  document.querySelector('[data-view-target="alerts"]').hidden = !can(permissions.viewMonitor);
+  document.querySelector('[data-view-target="oauth"]').hidden = !can(permissions.viewMonitor);
+  refreshButton.hidden = !can(permissions.viewMonitor);
+  if (adminRoleOption) adminRoleOption.hidden = currentUser.role !== "tronsoft_admin";
+  clientResellerSelect.hidden = !hasGlobalClientScope();
+  resellerNameInput.hidden = hasGlobalClientScope();
+  resellerDocumentInput.hidden = hasGlobalClientScope();
+  resellerNameInput.required = canManageClients && !hasGlobalClientScope();
+  clientResellerSelect.required = canManageClients && hasGlobalClientScope();
 
-  if (!tronsoft && currentResellers[0]) {
+  if (!hasGlobalClientScope() && currentResellers[0]) {
     resellerNameInput.value = currentResellers[0].name;
     resellerDocumentInput.value = currentResellers[0].document || "";
   }
 
   renderResellers();
+  updateUserRoleFields();
   showView(activeView);
 }
 
 async function loadCentralData() {
+  if (!can(permissions.viewMonitor)) return;
   if (dataLoadInFlight) return;
   dataLoadInFlight = true;
   try {
@@ -598,13 +664,13 @@ function startDashboardAutoRefresh() {
   if (dashboardRefreshTimer) clearInterval(dashboardRefreshTimer);
   if (refreshLabelTimer) clearInterval(refreshLabelTimer);
   dashboardRefreshTimer = setInterval(() => {
-    if (currentUser) loadCentralData().catch(showError);
+    if (currentUser && can(permissions.viewMonitor)) loadCentralData().catch(showError);
   }, dashboardRefreshIntervalMs);
   refreshLabelTimer = setInterval(updateRefreshLabel, 30_000);
 }
 
 async function loadUsersIfNeeded(force = false) {
-  if (currentUser?.role !== "tronsoft_admin") return;
+  if (!can(permissions.manageUsers)) return;
   if (usersLoaded && !force) {
     renderUsers();
     return;
@@ -1151,7 +1217,9 @@ function renderEnvironments() {
           <td><span class="status ${escapeHtml(status)}">${escapeHtml(status === "inactive" ? "Inativo" : (paired ? (statusLabels[status] || status) : "Pendente"))}</span></td>
           <td>${escapeHtml(database || "-")}</td>
           <td>${escapeHtml(lastSeen)}</td>
-          <td><button class="secondary-button compact-action" type="button" data-edit-environment-client="${escapeHtml(client.id)}">Editar</button></td>
+          <td>${can(permissions.manageClients) || can(permissions.generateTokens)
+            ? `<button class="secondary-button compact-action" type="button" data-edit-environment-client="${escapeHtml(client.id)}">Editar</button>`
+            : ""}</td>
         </tr>
       `;
     })
@@ -1218,7 +1286,6 @@ function openClientEditModal(client) {
   if (!modal || !form || !resellerSelect) return;
 
   const rawClient = client.rawClient;
-  const tronsoft = currentUser?.role === "tronsoft_admin";
   const isInactive = rawClient.status === "inactive";
   const options = resellerOptionsForEdit();
   resellerSelect.innerHTML = options
@@ -1229,24 +1296,36 @@ function openClientEditModal(client) {
   form.elements.installationId.value = client.installation?.installationId || "";
   form.elements.name.value = rawClient.name || client.name || "";
   form.elements.document.value = rawClient.document || "";
+  form.elements.name.disabled = !can(permissions.manageClients);
+  form.elements.document.disabled = !can(permissions.manageClients);
   resellerSelect.value = rawClient.resellerId || client.installation?.reseller?.id || "";
-  resellerSelect.disabled = !tronsoft;
-  if (!tronsoft && !resellerSelect.value && currentResellers[0]) {
+  resellerSelect.disabled = !can(permissions.manageClients) || (!hasGlobalClientScope() && currentResellers.length <= 1);
+  if (!hasGlobalClientScope() && !resellerSelect.value && currentResellers[0]) {
     resellerSelect.value = currentResellers[0].id;
   }
   const statusButton = document.querySelector("#client-edit-status");
+  const tokenButton = document.querySelector("#client-edit-token");
   const unpairButton = document.querySelector("#client-edit-unpair");
   const deleteButton = document.querySelector("#client-edit-delete");
+  const saveButton = document.querySelector("#client-edit-save");
   if (statusButton) {
     statusButton.textContent = isInactive ? "Ativar cliente" : "Desativar cliente";
     statusButton.dataset.nextStatus = isInactive ? "active" : "inactive";
+    statusButton.hidden = !can(permissions.manageClients);
+  }
+  if (tokenButton) {
+    tokenButton.hidden = !can(permissions.generateTokens);
   }
   if (unpairButton) {
+    unpairButton.hidden = !can(permissions.generateTokens);
     unpairButton.disabled = !form.elements.installationId.value;
     unpairButton.title = form.elements.installationId.value ? "" : "Cliente sem ambiente pareado.";
   }
   if (deleteButton) {
-    deleteButton.hidden = !tronsoft;
+    deleteButton.hidden = currentUser?.role !== "tronsoft_admin";
+  }
+  if (saveButton) {
+    saveButton.hidden = !can(permissions.manageClients);
   }
   if (error) error.textContent = "";
   modal.hidden = false;
@@ -1264,6 +1343,7 @@ function closeClientEditModal() {
 
 async function saveClientEdit(event) {
   event.preventDefault();
+  if (!can(permissions.manageClients)) return;
   const form = event.currentTarget;
   const error = document.querySelector("#client-edit-error");
   const clientId = form.elements.clientId.value;
@@ -2133,6 +2213,22 @@ function resellerNameById(id) {
   return currentResellers.find((reseller) => reseller.id === id)?.name || "TronSoft";
 }
 
+function userResellerScopeLabel(user) {
+  const ids = user.allowedResellerIds || [];
+  if (user.role === "tronsoft_admin" || (user.effectivePermissions?.includes(permissions.viewAllClients) && ids.length === 0)) {
+    return "Todas as revendas";
+  }
+  if (ids.length === 0) return "Sem revenda vinculada";
+  return ids.map(resellerNameById).join(", ");
+}
+
+function userPermissionLabel(user) {
+  const items = user.effectivePermissions || user.permissions || [];
+  if (user.role === "tronsoft_admin") return "Todas as permissoes";
+  if (items.length === 0) return "Sem permissoes";
+  return items.map((item) => permissionLabels[item] || item).join(", ");
+}
+
 function renderUsers() {
   const list = document.querySelector("#users-list");
   if (!list) return;
@@ -2143,7 +2239,9 @@ function renderUsers() {
         <div>
           <strong>${escapeHtml(user.name)}</strong>
           <span>${escapeHtml(user.email)}</span>
-          <span>${user.role === "tronsoft_admin" ? "TronSoft" : `Revenda: ${escapeHtml(resellerNameById(user.resellerId))}`}</span>
+          <span>${escapeHtml(roleLabel(user.role))}</span>
+          <span>Revendas: ${escapeHtml(userResellerScopeLabel(user))}</span>
+          <span>Permissoes: ${escapeHtml(userPermissionLabel(user))}</span>
         </div>
         <button class="secondary-button" type="button" data-password-user="${escapeHtml(user.id)}">Senha</button>
       </article>
@@ -2326,7 +2424,7 @@ async function createClient(event) {
   const data = new FormData(form);
   const result = document.querySelector("#pairing-result");
   const location = normalizeCitySelection(data);
-  const tronsoft = currentUser.role === "tronsoft_admin";
+  const scopedBySelect = hasGlobalClientScope();
   const selectedReseller = data.get("resellerId") === directTronsoftOption.id
     ? directTronsoftOption
     : currentResellers.find((reseller) => reseller.id === data.get("resellerId"));
@@ -2334,7 +2432,12 @@ async function createClient(event) {
   result.hidden = false;
   result.textContent = "Gerando token...";
 
-  if (tronsoft && !selectedReseller) {
+  if (!can(permissions.manageClients)) {
+    result.textContent = "Seu usuario nao possui permissao para cadastrar clientes.";
+    return;
+  }
+
+  if (scopedBySelect && !selectedReseller) {
     result.textContent = "Cadastre ou selecione uma revenda antes de cadastrar o cliente.";
     return;
   }
@@ -2343,7 +2446,8 @@ async function createClient(event) {
     const payload = await api("/api/admin/clients", {
       method: "POST",
       body: JSON.stringify({
-        reseller: tronsoft && selectedReseller
+        resellerId: scopedBySelect && selectedReseller && !selectedReseller.directTronsoft ? selectedReseller.id : "",
+        reseller: scopedBySelect && selectedReseller
           ? {
               name: selectedReseller.name,
               document: selectedReseller.document,
@@ -2506,7 +2610,7 @@ async function requestMaintenanceUpdate() {
 
 async function loadBackupStatus() {
   const result = document.querySelector("#maintenance-backup-status");
-  if (!result || currentUser?.role !== "tronsoft_admin") return;
+  if (!result || !can(permissions.maintenance)) return;
   try {
     const status = await api("/api/maintenance/backup/status");
     renderBackupStatus(status);
@@ -2550,12 +2654,39 @@ function renderPasswordResult(container, payload, defaultMessage) {
   `;
 }
 
+function defaultPermissionsForRole(role) {
+  if (role === "tronsoft_admin") return Object.values(permissions);
+  if (role === "tronsoft_user") return [permissions.viewMonitor, permissions.viewAllClients];
+  return [permissions.viewMonitor, permissions.manageClients, permissions.generateTokens];
+}
+
+function renderPermissionOptions() {
+  const grid = document.querySelector("#user-permissions-grid");
+  if (!grid) return;
+  grid.innerHTML = Object.entries(permissionLabels)
+    .filter(([value]) => currentUser?.role === "tronsoft_admin" || can(value))
+    .map(([value, label]) => `
+      <label class="permission-check">
+        <input type="checkbox" name="permissions" value="${escapeHtml(value)}">
+        <span>${escapeHtml(label)}</span>
+      </label>
+    `)
+    .join("");
+}
+
+function selectedValues(select) {
+  return Array.from(select?.selectedOptions || []).map((option) => option.value);
+}
+
 async function createUser(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
   const result = document.querySelector("#user-result");
   const role = data.get("role");
+  const allowedResellerIds = selectedValues(document.querySelector("#user-allowed-resellers"));
+  const selectedPermissions = Array.from(document.querySelectorAll("#user-permissions-grid input:checked"))
+    .map((input) => input.value);
 
   result.hidden = false;
   result.textContent = "Salvando usuario...";
@@ -2568,6 +2699,8 @@ async function createUser(event) {
         email: data.get("email"),
         role,
         resellerId: role === "reseller_user" ? data.get("resellerId") : "",
+        allowedResellerIds,
+        permissions: role === "tronsoft_admin" ? [] : selectedPermissions,
         password: data.get("password"),
         sendEmail: data.get("sendEmail") === "on"
       })
@@ -2637,8 +2770,38 @@ async function changeOwnPassword(event) {
 function updateUserRoleFields() {
   const role = document.querySelector("#user-role-select").value;
   const resellerSelect = document.querySelector("#user-reseller-select");
+  const accessPanel = document.querySelector("#user-access-panel");
+  const allowedResellers = document.querySelector("#user-allowed-resellers");
+  const permissionsPanel = document.querySelector("#user-permissions-panel");
+  const defaults = new Set(defaultPermissionsForRole(role));
   resellerSelect.hidden = role !== "reseller_user";
   resellerSelect.required = role === "reseller_user";
+  accessPanel.hidden = role === "tronsoft_admin";
+  permissionsPanel.hidden = role === "tronsoft_admin";
+  allowedResellers.disabled = role === "tronsoft_admin";
+  document.querySelectorAll("#user-permissions-grid input").forEach((input) => {
+    input.checked = defaults.has(input.value);
+    input.disabled = role === "tronsoft_admin" || (currentUser?.role !== "tronsoft_admin" && !can(input.value));
+  });
+  if (role === "reseller_user" && resellerSelect.value) {
+    Array.from(allowedResellers.options).forEach((option) => {
+      option.selected = option.value === resellerSelect.value;
+    });
+  } else if (role === "tronsoft_user") {
+    Array.from(allowedResellers.options).forEach((option) => {
+      option.selected = false;
+    });
+  }
+}
+
+function syncPrimaryResellerScope() {
+  const role = document.querySelector("#user-role-select").value;
+  if (role !== "reseller_user") return;
+  const resellerId = document.querySelector("#user-reseller-select").value;
+  const allowedResellers = document.querySelector("#user-allowed-resellers");
+  Array.from(allowedResellers.options).forEach((option) => {
+    option.selected = option.value === resellerId;
+  });
 }
 
 async function createReseller(event) {
@@ -2736,6 +2899,7 @@ document.querySelector("#client-edit-form input[name='document']").addEventListe
 document.querySelector("#reseller-form").addEventListener("submit", createReseller);
 document.querySelector("#user-form").addEventListener("submit", createUser);
 document.querySelector("#user-role-select").addEventListener("change", updateUserRoleFields);
+document.querySelector("#user-reseller-select").addEventListener("change", syncPrimaryResellerScope);
 document.querySelector("#account-password-form").addEventListener("submit", changeOwnPassword);
 document.querySelector("#client-detail-back").addEventListener("click", closeClientDetail);
 document.querySelector("#maintenance-update-button").addEventListener("click", requestMaintenanceUpdate);
