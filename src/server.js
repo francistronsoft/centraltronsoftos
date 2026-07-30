@@ -22,6 +22,7 @@ const permissions = {
   generateTokens: "generate_tokens",
   manageResellers: "manage_resellers",
   manageUsers: "manage_users",
+  manageOAuth: "manage_oauth",
   maintenance: "maintenance"
 };
 const allPermissions = Object.values(permissions);
@@ -2270,6 +2271,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname === "/api/oauth/google/summary") {
+    requirePermission(user, permissions.manageOAuth, "Sem permissao para consultar 0auth.");
     const installations = scopedInstallations(db, user, resellerId);
     const installationIds = new Set(installations.map((installation) => installation.installationId));
     const credentials = db.oauthCredentials.filter((credential) => {

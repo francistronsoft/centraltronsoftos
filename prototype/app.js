@@ -36,6 +36,7 @@ const clientsPageSize = 10;
 const environmentPageSize = 10;
 const dashboardRefreshIntervalMs = 30_000;
 const themeKey = "central-theme";
+const sidebarCollapsedKey = "central-sidebar-collapsed";
 const permissions = {
   viewMonitor: "view_monitor",
   viewAllClients: "view_all_clients",
@@ -43,6 +44,7 @@ const permissions = {
   generateTokens: "generate_tokens",
   manageResellers: "manage_resellers",
   manageUsers: "manage_users",
+  manageOAuth: "manage_oauth",
   maintenance: "maintenance"
 };
 
@@ -53,6 +55,7 @@ const permissionLabels = {
   [permissions.generateTokens]: "Gerar tokens e desvincular ambientes",
   [permissions.manageResellers]: "Cadastrar revendas",
   [permissions.manageUsers]: "Cadastrar usuarios",
+  [permissions.manageOAuth]: "0auth Google Drive",
   [permissions.maintenance]: "Manutencao da Central"
 };
 
@@ -153,6 +156,10 @@ function iconRefresh() {
 
 function iconLogout() {
   return svgIcon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="M16 17l5-5-5-5"></path><path d="M21 12H9"></path>');
+}
+
+function iconMenu() {
+  return svgIcon('<path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path>');
 }
 
 function iconMoon() {
@@ -392,7 +399,7 @@ function showView(view) {
     dashboard: can(permissions.viewMonitor),
     environments: can(permissions.viewMonitor),
     alerts: can(permissions.viewMonitor),
-    oauth: can(permissions.viewMonitor),
+    oauth: can(permissions.manageOAuth),
     clients: can(permissions.manageClients),
     resellers: can(permissions.manageResellers),
     users: can(permissions.manageUsers),
@@ -418,7 +425,7 @@ function showView(view) {
 
 async function ensureActiveViewData() {
   if (activeView === "users") await loadUsersIfNeeded();
-  if (activeView === "oauth") await loadOAuthSummaryIfNeeded();
+  if (activeView === "oauth" && can(permissions.manageOAuth)) await loadOAuthSummaryIfNeeded();
   if (activeView === "environments") renderEnvironments();
   if (activeView === "maintenance") await loadBackupStatus();
 }
@@ -521,7 +528,7 @@ async function configureScopeControls() {
   document.querySelector('[data-view-target="dashboard"]').hidden = !can(permissions.viewMonitor);
   document.querySelector('[data-view-target="environments"]').hidden = !can(permissions.viewMonitor);
   document.querySelector('[data-view-target="alerts"]').hidden = !can(permissions.viewMonitor);
-  document.querySelector('[data-view-target="oauth"]').hidden = !can(permissions.viewMonitor);
+  document.querySelector('[data-view-target="oauth"]').hidden = !can(permissions.manageOAuth);
   refreshButton.hidden = !can(permissions.viewMonitor);
   if (adminRoleOption) adminRoleOption.hidden = currentUser.role !== "tronsoft_admin";
   clientResellerSelect.hidden = !hasGlobalClientScope();
@@ -823,7 +830,7 @@ function renderTopIncidents(summary) {
   container.innerHTML = incidents.map(({ alert, client }) => {
     const status = alert.severity === "critical" ? "offline" : alert.severity === "warning" ? "warning" : "unknown";
     return `
-      <article class="incident-row">
+      <article class="incident-row ${client ? "clickable-row" : ""}" ${client ? `data-client-detail="${escapeHtml(client.detailId || client.id)}"` : ""}>
         <span class="incident-kind ${escapeHtml(status)}">${escapeHtml(alert.severity === "critical" ? "Critico" : alert.severity === "warning" ? "Atencao" : "Info")}</span>
         <div>
           <strong>${escapeHtml(client?.name || alert.clientName || "Cliente")}</strong>
@@ -833,6 +840,9 @@ function renderTopIncidents(summary) {
       </article>
     `;
   }).join("") || `<p class="empty-note">Nenhum incidente aberto no escopo atual.</p>`;
+  container.querySelectorAll("[data-client-detail]").forEach((row) => {
+    row.addEventListener("click", () => openClientDetail(row.dataset.clientDetail, "dashboard"));
+  });
 }
 
 function diskPercent(installation) {
@@ -996,6 +1006,7 @@ function latestRawBackupFile(backups = {}) {
 
 function backupPanelLabel(client, backups = {}) {
   const label = client?.backup?.label || "--";
+  if (environmentPlatform(client) === "windows") return label;
   const latestRaw = latestRawBackupFile(backups);
   const rawTime = backupFileTimestamp(latestRaw);
   const validatedTime = backups.latestValidatedBackupAt
@@ -1172,6 +1183,8 @@ function renderEnvironments() {
         client.name,
         documentValue,
         client.reseller,
+        client.city,
+        client.state,
         client.environment,
         client.database,
         client.host?.hostname,
@@ -1198,7 +1211,8 @@ function renderEnvironments() {
   table.innerHTML = pageItems
     .map((client) => {
       const paired = Boolean(client.installation);
-      const hasHa = environmentHaStatus(client);
+      const supportsHa = environmentPlatform(client) !== "windows";
+      const hasHa = supportsHa && environmentHaStatus(client);
       const status = client.rawClient?.status === "inactive" ? "inactive" : (paired ? monitorStatus(client) : "unknown");
       const documentValue = client.rawClient?.document || "-";
       const pairing = paired
@@ -1212,7 +1226,7 @@ function renderEnvironments() {
           <td>${escapeHtml(documentValue)}</td>
           <td>${escapeHtml(client.reseller)}</td>
           <td>${pairing}</td>
-          <td><span class="index-pill ${hasHa ? "online" : "unknown"}">${hasHa ? "Com HA" : "Sem HA"}</span></td>
+          <td><span class="index-pill ${supportsHa ? (hasHa ? "online" : "unknown") : "neutral"}">${supportsHa ? (hasHa ? "Com HA" : "Sem HA") : "N/A"}</span></td>
           <td>${escapeHtml(client.environment || "Ambiente principal")}</td>
           <td><span class="status ${escapeHtml(status)}">${escapeHtml(status === "inactive" ? "Inativo" : (paired ? (statusLabels[status] || status) : "Pendente"))}</span></td>
           <td>${escapeHtml(database || "-")}</td>
@@ -1906,16 +1920,17 @@ function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage 
   `;
 }
 
-function renderBackupFiles(files = []) {
+function renderBackupFiles(files = [], client = null) {
   if (!Array.isArray(files) || files.length === 0) {
     return `<p class="empty-note">Nenhum arquivo de backup recente informado.</p>`;
   }
+  const validateBackups = environmentPlatform(client) !== "windows";
   const manifests = new Set(files.filter(isBackupManifestFile).map(backupFileKey));
   return files.slice(0, 6).map((file) => `
-    <article class="detail-list-item ${isBackupPayloadFile(file) && !manifests.has(backupFileKey(file)) ? "warning" : ""}">
+    <article class="detail-list-item ${validateBackups && isBackupPayloadFile(file) && !manifests.has(backupFileKey(file)) ? "warning" : ""}">
       <strong>${escapeHtml(file.name || file.path || "Backup")}</strong>
       <span>${escapeHtml(file.modifiedAt ? formatRelativeTime(file.modifiedAt) : "-")} ${file.size ? `- ${escapeHtml(bytesLabel(file.size))}` : ""}</span>
-      <small>${escapeHtml(isBackupManifestFile(file) ? "manifesto de validacao" : manifests.has(backupFileKey(file)) ? "backup validado" : "aguardando validacao")}</small>
+      <small>${escapeHtml(!validateBackups ? "backup informado pelo agente" : isBackupManifestFile(file) ? "manifesto de validacao" : manifests.has(backupFileKey(file)) ? "backup validado" : "aguardando validacao")}</small>
     </article>
   `).join("");
 }
@@ -1941,6 +1956,8 @@ function renderClientDetail(client) {
   const googleDrive = client.googleDrive || {};
   const metrics = client.metrics || {};
   const cluster = client.cluster || {};
+  const platform = environmentPlatform(client);
+  const supportsHa = platform !== "windows";
   const location = [client.city, client.state].filter(Boolean).join(" / ") || "-";
   const disk = gaugeValue(client.diskPercent);
   const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
@@ -2030,7 +2047,7 @@ function renderClientDetail(client) {
         <article class="ops-panel">
           <div class="ops-panel-head">
             <div>
-              <h3>CPU / Memoria</h3>
+              <h3>CPU / Memoria / Disco</h3>
               <span>desempenho e armazenamento do servidor</span>
             </div>
           </div>
@@ -2071,19 +2088,21 @@ function renderClientDetail(client) {
     <section class="ops-grid">
       <article class="ops-panel">
         <div class="ops-panel-head"><h3>Backups recentes</h3><span>${escapeHtml(backupPanelLabel(client, backups))}</span></div>
-        <div class="detail-list">${renderBackupFiles(backups.recentFiles)}</div>
+        <div class="detail-list">${renderBackupFiles(backups.recentFiles, client)}</div>
       </article>
 
       <article class="ops-panel">
-        <div class="ops-panel-head"><h3>HA / Standby</h3><span>alta disponibilidade</span></div>
-        <div class="detail-grid compact">
-          ${detailItem("Modo", cluster.mode)}
-          ${detailItem("No", cluster.identity?.nodeRole || cluster.nodeRole)}
-          ${detailItem("Standby pronto", cluster.sync?.standbyReady === true ? "Sim" : cluster.sync?.standbyReady === false ? "Nao" : "-")}
-          ${detailItem("Lag standby", cluster.sync?.standbyLagMinutes !== undefined ? `${cluster.sync.standbyLagMinutes} min` : "-")}
-          ${detailItem("Failover", cluster.failover?.enabled === true ? "Ativo" : cluster.failover?.enabled === false ? "Manual/desativado" : "-")}
-          ${detailItem("VIP", cluster.vipStatus?.ip || cluster.vip || "-")}
-        </div>
+        <div class="ops-panel-head"><h3>HA / Standby</h3><span>${supportsHa ? "alta disponibilidade" : "nao aplicavel ao Agent Windows"}</span></div>
+        ${supportsHa ? `
+          <div class="detail-grid compact">
+            ${detailItem("Modo", cluster.mode)}
+            ${detailItem("No", cluster.identity?.nodeRole || cluster.nodeRole)}
+            ${detailItem("Standby pronto", cluster.sync?.standbyReady === true ? "Sim" : cluster.sync?.standbyReady === false ? "Nao" : "-")}
+            ${detailItem("Lag standby", cluster.sync?.standbyLagMinutes !== undefined ? `${cluster.sync.standbyLagMinutes} min` : "-")}
+            ${detailItem("Failover", cluster.failover?.enabled === true ? "Ativo" : cluster.failover?.enabled === false ? "Manual/desativado" : "-")}
+            ${detailItem("VIP", cluster.vipStatus?.ip || cluster.vip || "-")}
+          </div>
+        ` : `<p class="empty-note">HA / standby e validacao local sao recursos do TronSoftOS em Linux.</p>`}
       </article>
     </section>
 
@@ -2307,6 +2326,7 @@ function renderGeoMap() {
           ${point.count} servidor(es)<br>
           ${point.online} online, ${point.warning} em atencao
         `)
+        .on("click", () => filterEnvironmentsByLocation(point))
         .addTo(geoLeafletLayer);
       bounds.push(coordinates);
     });
@@ -2321,12 +2341,26 @@ function renderGeoMap() {
 
   list.innerHTML = points
     .map((point) => `
-      <article class="geo-item">
+      <article class="geo-item clickable-row" data-city="${escapeHtml(point.city)}" data-state="${escapeHtml(point.state)}">
         <strong>${escapeHtml(point.city)} / ${escapeHtml(point.state)}</strong>
         <span>${point.count} servidor(es), ${point.online} online, ${point.warning} em atencao</span>
       </article>
     `)
     .join("") || `<p class="empty-note">Cadastre cidade/UF e pareie ambientes para popular o mapa.</p>`;
+  list.querySelectorAll("[data-city][data-state]").forEach((item) => {
+    item.addEventListener("click", () => filterEnvironmentsByLocation({
+      city: item.dataset.city,
+      state: item.dataset.state
+    }));
+  });
+}
+
+function filterEnvironmentsByLocation(point) {
+  const input = document.querySelector("#environment-filter");
+  if (input) input.value = `${point.city} ${point.state}`.trim();
+  environmentPage = 1;
+  showView("environments");
+  renderEnvironments();
 }
 
 function applyTheme(theme) {
@@ -2343,6 +2377,22 @@ function applyTheme(theme) {
 
 function toggleTheme() {
   applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+function applySidebarState(collapsed) {
+  const shell = document.querySelector("#app-shell");
+  const button = document.querySelector("#sidebar-toggle-button");
+  if (!shell || !button) return;
+  shell.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+  button.innerHTML = iconMenu();
+  button.title = collapsed ? "Exibir menu" : "Ocultar menu";
+  button.setAttribute("aria-label", button.title);
+  localStorage.setItem(sidebarCollapsedKey, collapsed ? "1" : "0");
+  if (geoLeafletMap) setTimeout(() => geoLeafletMap.invalidateSize(), 120);
+}
+
+function toggleSidebar() {
+  applySidebarState(!document.querySelector("#app-shell")?.classList.contains("sidebar-collapsed"));
 }
 
 function renderOAuthSummary() {
@@ -2906,9 +2956,11 @@ document.querySelector("#maintenance-update-button").addEventListener("click", r
 document.querySelector("#maintenance-backup-button").addEventListener("click", requestMaintenanceBackup);
 document.querySelector("#maintenance-backup-refresh-button").addEventListener("click", loadBackupStatus);
 document.querySelector("#maintenance-backup-download-button").addEventListener("click", downloadLatestBackup);
+document.querySelector("#sidebar-toggle-button").addEventListener("click", toggleSidebar);
 
 document.querySelector("#refresh-button").innerHTML = iconRefresh();
 document.querySelector("#logout-button").innerHTML = iconLogout();
+applySidebarState(localStorage.getItem(sidebarCollapsedKey) === "1");
 applyTheme(localStorage.getItem(themeKey) || "light");
 setupCityOptions();
 updateUserRoleFields();

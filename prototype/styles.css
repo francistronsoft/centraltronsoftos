@@ -53,6 +53,10 @@ body {
   grid-template-columns: 252px 1fr;
 }
 
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
 .login-view {
   min-height: 100vh;
   display: grid;
@@ -114,6 +118,14 @@ input {
   padding: 20px 16px;
   background: var(--ink);
   color: #fff;
+  overflow: hidden;
+  transition: width 0.18s ease, padding 0.18s ease;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .brand {
@@ -219,6 +231,21 @@ input {
   margin-bottom: 24px;
 }
 
+.topbar-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.topbar-title h1 {
+  overflow-wrap: anywhere;
+}
+
+.menu-toggle {
+  flex: 0 0 auto;
+}
+
 h1,
 h2,
 p {
@@ -243,6 +270,8 @@ p {
 .actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -433,7 +462,7 @@ p {
 
 .ops-dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr) minmax(320px, 0.9fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   align-items: stretch;
   margin-bottom: 18px;
@@ -449,7 +478,7 @@ p {
 
 .health-body {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: minmax(128px, 168px) minmax(0, 1fr);
   gap: 18px;
   align-items: center;
   padding: 18px;
@@ -458,8 +487,9 @@ p {
 .health-ring {
   display: grid;
   place-items: center;
-  width: 168px;
-  height: 168px;
+  width: min(168px, 100%);
+  aspect-ratio: 1;
+  height: auto;
   border-radius: 50%;
   background:
     radial-gradient(circle at center, var(--surface) 0 58%, transparent 59%),
@@ -479,7 +509,7 @@ p {
 
 .health-stats div {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   min-height: 40px;
@@ -494,6 +524,7 @@ p {
 
 .health-stats strong {
   font-size: 26px;
+  min-width: 0;
 }
 
 .health-legend {
@@ -2315,6 +2346,50 @@ tr:last-child td {
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+}
+
+@media (max-width: 1280px) {
+  .app {
+    padding: 22px;
+  }
+
+  .ops-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-map-panel,
+  .server-groups-panel,
+  .top-incidents-panel,
+  .event-log-panel {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 1080px) {
+  .app-shell {
+    grid-template-columns: 212px 1fr;
+  }
+
+  .sidebar {
+    padding: 18px 12px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .ops-dashboard-grid,
+  .ops-grid,
+  .ops-detail-main,
+  .dashboard-map-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 980px) {

@@ -6,7 +6,7 @@
     <title>Central TronSoftOS</title>
     <link rel="icon" href="favicon.svg?v=central-c" type="image/svg+xml">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=20260724-index-history">
+    <link rel="stylesheet" href="styles.css?v=20260730-dashboard-permissions">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -54,9 +54,12 @@
 
       <main class="app">
         <header class="topbar">
-          <div>
+          <div class="topbar-title">
+            <button type="button" class="icon-button menu-toggle" id="sidebar-toggle-button" aria-label="Ocultar menu" title="Ocultar menu"></button>
+            <div>
             <h1 id="page-title">Monitoramento geral</h1>
             <p id="scope-label" hidden></p>
+            </div>
           </div>
           <div class="actions">
             <select id="reseller-filter" hidden></select>
@@ -453,6 +456,6 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260730-user-permissions"></script>
+    <script src="app.js?v=20260730-dashboard-permissions"></script>
   </body>
 </html>
