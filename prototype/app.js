@@ -20,6 +20,7 @@ let activeView = "dashboard";
 let monitorFilter = "all";
 let clientPage = 1;
 let environmentPage = 1;
+let environmentQuickFilter = "";
 let maintenanceJobId = null;
 let maintenancePollTimer = null;
 let backupJobId = null;
@@ -632,10 +633,13 @@ async function loadCentralData() {
     currentAuthEvents = alerts.slice(-5).reverse().map((alert) => {
       const detail = `${alert.severity} - ${alert.message || alert.code || "Sem detalhes"}`;
       return {
-      title: alert.title,
-      detail,
-      summary: compactText(detail, 120),
-      occurredAt: alert.openedAt || alert.receivedAt || alert.createdAt || alert.resolvedAt || null
+        title: alert.title,
+        detail,
+        summary: compactText(detail, 120),
+        occurredAt: alert.openedAt || alert.receivedAt || alert.createdAt || alert.resolvedAt || null,
+        clientId: alert.clientId || "",
+        installationId: alert.installationId || "",
+        alert
       };
     });
 
@@ -792,15 +796,15 @@ function renderServerGroups(summary) {
   const container = document.querySelector("#server-groups");
   if (!container) return;
   const items = [
-    { label: "Windows", value: summary.windows, detail: "Agent Windows", icon: "windows", tone: "danger" },
-    { label: "Linux", value: summary.linux, detail: "TronSoftOS", icon: "linux", tone: "ok" },
-    { label: "Banco", value: summary.monitored.length, detail: "Firebird monitorado", icon: "database", tone: "neutral" },
-    { label: "Backup", value: summary.backupLate, detail: "atrasados", icon: "backup", tone: summary.backupLate ? "warning" : "ok" },
-    { label: "Indices", value: summary.indexProblems, detail: "atencao/sem leitura", icon: "alert", tone: summary.indexProblems ? "danger" : "ok" },
-    { label: "Offline", value: summary.offline, detail: "sem heartbeat", icon: "offline", tone: summary.offline ? "danger" : "ok" }
+    { label: "Windows", value: summary.windows, detail: "Agent Windows", icon: "windows", tone: "danger", filter: "windows" },
+    { label: "Linux", value: summary.linux, detail: "TronSoftOS", icon: "linux", tone: "ok", filter: "linux" },
+    { label: "Banco", value: summary.monitored.length, detail: "Firebird monitorado", icon: "database", tone: "neutral", filter: "database" },
+    { label: "Backup", value: summary.backupLate, detail: "atrasados", icon: "backup", tone: summary.backupLate ? "warning" : "ok", filter: "backup" },
+    { label: "Indices", value: summary.indexProblems, detail: "atencao/sem leitura", icon: "alert", tone: summary.indexProblems ? "danger" : "ok", filter: "indexes" },
+    { label: "Offline", value: summary.offline, detail: "sem heartbeat", icon: "offline", tone: summary.offline ? "danger" : "ok", filter: "offline" }
   ];
   container.innerHTML = items.map((item) => `
-    <article class="server-group-card ${escapeHtml(item.tone)}">
+    <article class="server-group-card clickable-row ${escapeHtml(item.tone)}" data-environment-group="${escapeHtml(item.filter)}" title="Filtrar ambientes: ${escapeHtml(item.label)}">
       <span class="server-group-icon">${dashboardIcon(item.icon)}</span>
       <div>
         <strong>${item.value}</strong>
@@ -809,6 +813,9 @@ function renderServerGroups(summary) {
       </div>
     </article>
   `).join("");
+  container.querySelectorAll("[data-environment-group]").forEach((card) => {
+    card.addEventListener("click", () => applyEnvironmentQuickFilter(card.dataset.environmentGroup || ""));
+  });
 }
 
 function renderTopIncidents(summary) {
@@ -1177,6 +1184,9 @@ function renderEnvironments() {
     .filter((client) => {
       const paired = Boolean(client.installation);
       const hasHa = environmentHaStatus(client);
+      const platform = environmentPlatform(client);
+      const status = client.rawClient?.status === "inactive" ? "inactive" : (paired ? monitorStatus(client) : "unknown");
+      const indexTone = indexHealthStatus(client).tone;
       const documentValue = client.rawClient?.document || "";
       const installationId = client.installation?.installationId || "";
       const searchable = [
@@ -1189,6 +1199,7 @@ function renderEnvironments() {
         client.database,
         client.host?.hostname,
         client.host?.ip,
+        platform,
         installationId
       ].filter(Boolean).join(" ").toLowerCase();
       if (textFilter && !searchable.includes(textFilter)) return false;
@@ -1196,6 +1207,12 @@ function renderEnvironments() {
       if (pairingFilter === "paired" && !paired) return false;
       if (haFilter === "ha" && !hasHa) return false;
       if (haFilter === "simple" && hasHa) return false;
+      if (environmentQuickFilter === "windows" && platform !== "windows") return false;
+      if (environmentQuickFilter === "linux" && platform !== "linux") return false;
+      if (environmentQuickFilter === "database" && !paired) return false;
+      if (environmentQuickFilter === "backup" && client.backup?.tone !== "warning") return false;
+      if (environmentQuickFilter === "indexes" && !["warning", "offline"].includes(indexTone)) return false;
+      if (environmentQuickFilter === "offline" && status !== "offline") return false;
       return true;
     })
     .sort((left, right) => {
@@ -2152,10 +2169,35 @@ function alertContext(alert) {
   const client = currentClients.find((item) => item.id === alert.clientId);
   const rawClient = client?.rawClient || installation?.client || {};
   return {
+    client,
+    installation,
+    detailId: client?.detailId || installation?.installationId || alert.installationId || client?.id || "",
     clientName: client?.name || installation?.client?.name || "Cliente nao identificado",
     document: rawClient.document || rawClient.customerDocument || "",
     resellerName: client?.reseller || installation?.reseller?.name || "Sem revenda",
     environment: installation?.name || alert.installationId || "-"
+  };
+}
+
+function eventContext(event) {
+  const alert = event.alert || {};
+  const installationId = event.installationId || alert.installationId || event.payload?.installationId || "";
+  const clientId = event.clientId || alert.clientId || event.payload?.clientId || "";
+  const installation = currentInstallations.find((item) => item.installationId === installationId);
+  const client = currentClients.find((item) => (
+    item.id === clientId ||
+    item.detailId === installationId ||
+    item.installation?.installationId === installationId
+  ));
+  const rawClient = client?.rawClient || installation?.client || {};
+  return {
+    client,
+    installation,
+    detailId: client?.detailId || installation?.installationId || installationId || client?.id || "",
+    clientName: client?.name || installation?.client?.name || event.clientName || "",
+    document: rawClient.document || rawClient.customerDocument || "",
+    resellerName: client?.reseller || installation?.reseller?.name || "",
+    environment: client?.environment || installation?.name || installationId || ""
   };
 }
 
@@ -2358,6 +2400,21 @@ function renderGeoMap() {
 function filterEnvironmentsByLocation(point) {
   const input = document.querySelector("#environment-filter");
   if (input) input.value = `${point.city} ${point.state}`.trim();
+  environmentQuickFilter = "";
+  environmentPage = 1;
+  showView("environments");
+  renderEnvironments();
+}
+
+function applyEnvironmentQuickFilter(filter) {
+  environmentQuickFilter = filter || "";
+  const text = document.querySelector("#environment-filter");
+  const pairing = document.querySelector("#environment-pairing-filter");
+  const ha = document.querySelector("#environment-ha-filter");
+  if (text) text.value = "";
+  if (pairing) pairing.value = "";
+  if (ha) ha.value = "";
+  if (environmentQuickFilter === "database" && pairing) pairing.value = "paired";
   environmentPage = 1;
   showView("environments");
   renderEnvironments();
@@ -2446,9 +2503,12 @@ function renderAuthEvents() {
         const hasMore = String(event.detail || "").length > String(event.summary || event.detail || "").length;
         const fullTitle = String(event.title || "Evento");
         const shortTitle = compactText(fullTitle, 72);
+        const context = eventContext(event);
+        const contextLabel = [context.clientName, context.environment, context.resellerName].filter(Boolean).join(" / ");
         return `
-        <article class="event">
+        <article class="event ${context.detailId ? "clickable-row" : ""}" ${context.detailId ? `data-event-client-detail="${escapeHtml(context.detailId)}"` : ""}>
           <strong title="${escapeHtml(fullTitle)}">${escapeHtml(shortTitle)}</strong>
+          ${contextLabel ? `<small class="event-context">${escapeHtml(contextLabel)}</small>` : ""}
           ${event.occurredAt ? `<small>${escapeHtml(formatDateTime(event.occurredAt))}</small>` : ""}
           <span class="event-summary">${escapeHtml(event.summary || event.detail)}</span>
           ${hasMore ? `<button class="event-more-button" type="button" data-event-more="${index}">Ver mais</button><span class="event-detail" hidden>${escapeHtml(event.detail)}</span>` : ""}
@@ -2457,8 +2517,12 @@ function renderAuthEvents() {
       }
     )
     .join("");
+  list.querySelectorAll("[data-event-client-detail]").forEach((row) => {
+    row.addEventListener("click", () => openClientDetail(row.dataset.eventClientDetail, "dashboard"));
+  });
   list.querySelectorAll("[data-event-more]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (clickEvent) => {
+      clickEvent.stopPropagation();
       const detail = button.parentElement?.querySelector(".event-detail");
       if (!detail) return;
       const expanded = !detail.hidden;
@@ -2919,10 +2983,12 @@ document.querySelector("#client-filter")?.addEventListener("input", (event) => {
 });
 ["#environment-filter", "#environment-pairing-filter", "#environment-ha-filter"].forEach((selector) => {
   document.querySelector(selector)?.addEventListener("input", () => {
+    environmentQuickFilter = "";
     environmentPage = 1;
     renderEnvironments();
   });
   document.querySelector(selector)?.addEventListener("change", () => {
+    environmentQuickFilter = "";
     environmentPage = 1;
     renderEnvironments();
   });

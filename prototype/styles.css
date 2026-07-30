@@ -599,6 +599,10 @@ p {
   box-shadow: inset -6px 0 #d0d7de;
 }
 
+.server-group-card.clickable-row:hover {
+  background: var(--surface-soft);
+}
+
 .server-group-card:nth-child(2n) {
   border-right: 0;
 }
@@ -2291,6 +2295,11 @@ tr:last-child td {
   background: var(--surface-soft);
 }
 
+.event.clickable-row:hover {
+  border-color: #8db7da;
+  background: var(--surface);
+}
+
 .event strong,
 .event span,
 .event small {
@@ -2309,6 +2318,11 @@ tr:last-child td {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
+}
+
+.event .event-context {
+  color: #315779;
+  font-weight: 700;
 }
 
 .event span {
