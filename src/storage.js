@@ -15,12 +15,15 @@ const emptyDb = {
   installations: [],
   alerts: [],
   events: [],
+  auditLogs: [],
+  loginAttempts: [],
   oauthStates: [],
   oauthCredentials: [],
   oauthEvents: []
 };
 
 const maxEvents = Number(process.env.CENTRAL_MAX_EVENTS || 300);
+const maxAuditLogs = Number(process.env.CENTRAL_MAX_AUDIT_LOGS || 1000);
 const maxAlerts = Number(process.env.CENTRAL_MAX_ALERTS || 500);
 const maxMetricSeries = Number(process.env.CENTRAL_MAX_METRIC_SERIES || 96);
 const maxBackupFiles = Number(process.env.CENTRAL_MAX_BACKUP_FILES || 20);
@@ -118,6 +121,8 @@ function compactDb(db) {
     metrics: compactMetricSeries(installation.metrics)
   }));
   next.events = next.events.slice(-maxEvents).map(compactEvent);
+  next.auditLogs = (next.auditLogs || []).slice(-maxAuditLogs);
+  next.loginAttempts = (next.loginAttempts || []).slice(-500);
   next.alerts = next.alerts.slice(-maxAlerts);
   next.oauthEvents = next.oauthEvents.slice(-maxEvents);
   return next;

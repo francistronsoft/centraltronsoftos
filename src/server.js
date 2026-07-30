@@ -37,6 +37,9 @@ const backupTimeoutMs = Number(process.env.CENTRAL_BACKUP_TIMEOUT_MS || 20 * 60 
 const maxJobLogLength = 80_000;
 const maxMetricSeries = 288;
 const offlineAfterMinutes = Number(process.env.CENTRAL_OFFLINE_AFTER_MINUTES || 15);
+const loginAttemptWindowMs = Number(process.env.CENTRAL_LOGIN_ATTEMPT_WINDOW_MS || 15 * 60 * 1000);
+const loginLockMs = Number(process.env.CENTRAL_LOGIN_LOCK_MS || 15 * 60 * 1000);
+const maxLoginFailures = Number(process.env.CENTRAL_LOGIN_MAX_FAILURES || 5);
 const maintenanceJobs = new Map();
 
 const contentTypes = {
@@ -51,8 +54,98 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function requestIp(request) {
+  const forwarded = String(request.headers["cf-connecting-ip"] || request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwarded || request.socket?.remoteAddress || "unknown";
+}
+
+function hashIdentifier(value) {
+  return pbkdf2Sync(String(value || ""), "central-audit", 1, 12, "sha256").toString("hex");
+}
+
+function maskSecretValue(value) {
+  const text = String(value ?? "");
+  if (!text) return "";
+  if (text.length <= 8) return "***";
+  return `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
+function redactSecrets(value) {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string") {
+      return value
+        .replace(/(password|passwd|senha|token|secret|client_secret|refresh_token|access_token)(["'=:\s]+)([^"'\s,}]+)/gi, "$1$2***")
+        .replace(/(cts_)[a-z0-9]+/gi, "$1***");
+    }
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    const sensitive = /password|passwd|senha|token|secret|client_secret|refresh_token|access_token|authorization/i.test(key);
+    return [key, sensitive ? maskSecretValue(item) : redactSecrets(item)];
+  }));
+}
+
+function addAuditLog(db, request, action, details = {}, user = null) {
+  db.auditLogs = Array.isArray(db.auditLogs) ? db.auditLogs : [];
+  db.auditLogs.push({
+    id: randomUUID(),
+    action,
+    userId: user?.id || null,
+    userEmail: user?.email || null,
+    ip: request ? requestIp(request) : "system",
+    userAgent: request ? String(request.headers["user-agent"] || "").slice(0, 240) : "",
+    details: redactSecrets(details),
+    createdAt: nowIso()
+  });
+  db.auditLogs = db.auditLogs.slice(-Number(process.env.CENTRAL_MAX_AUDIT_LOGS || 1000));
+}
+
+function loginAttemptKey(email, ip) {
+  return `${String(email || "").toLowerCase()}|${hashIdentifier(ip)}`;
+}
+
+function cleanLoginAttempts(db) {
+  const cutoff = Date.now() - Math.max(loginAttemptWindowMs, loginLockMs) * 2;
+  db.loginAttempts = (db.loginAttempts || []).filter((item) => new Date(item.updatedAt || item.createdAt || 0).getTime() > cutoff);
+}
+
+function currentLoginAttempt(db, email, ip) {
+  cleanLoginAttempts(db);
+  const key = loginAttemptKey(email, ip);
+  let attempt = db.loginAttempts.find((item) => item.key === key);
+  if (!attempt) {
+    attempt = { key, email: String(email || "").toLowerCase(), ipHash: hashIdentifier(ip), failures: 0, lockedUntil: null, createdAt: nowIso(), updatedAt: nowIso() };
+    db.loginAttempts.push(attempt);
+  }
+  return attempt;
+}
+
+function assertLoginNotLocked(attempt) {
+  if (attempt.lockedUntil && new Date(attempt.lockedUntil).getTime() > Date.now()) {
+    throw httpError(429, "Muitas tentativas de login. Aguarde alguns minutos e tente novamente.");
+  }
+}
+
+function recordLoginFailure(attempt) {
+  const last = new Date(attempt.updatedAt || 0).getTime();
+  if (!Number.isFinite(last) || Date.now() - last > loginAttemptWindowMs) {
+    attempt.failures = 0;
+    attempt.lockedUntil = null;
+  }
+  attempt.failures = Number(attempt.failures || 0) + 1;
+  attempt.updatedAt = nowIso();
+  if (attempt.failures >= maxLoginFailures) {
+    attempt.lockedUntil = new Date(Date.now() + loginLockMs).toISOString();
+  }
+}
+
+function clearLoginAttempt(db, attempt) {
+  db.loginAttempts = (db.loginAttempts || []).filter((item) => item.key !== attempt.key);
+}
+
 function appendJobLog(job, stream, chunk) {
-  job[stream] += chunk.toString();
+  job[stream] += redactSecrets(chunk.toString());
   if (job[stream].length > maxJobLogLength) {
     job[stream] = job[stream].slice(job[stream].length - maxJobLogLength);
   }
@@ -1408,13 +1501,21 @@ async function handleLogin(request, response) {
   const email = requireText(payload.email, "email").toLowerCase();
   const password = requireText(payload.password, "password");
   const db = await readDbWithBootstrap();
+  const ip = requestIp(request);
+  const attempt = currentLoginAttempt(db, email, ip);
+  assertLoginNotLocked(attempt);
   const user = db.users.find((item) => item.email.toLowerCase() === email && item.status === "active");
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    recordLoginFailure(attempt);
+    addAuditLog(db, request, "auth.login_failed", { email, failures: attempt.failures, lockedUntil: attempt.lockedUntil }, null);
+    await writeDb(db);
     throw httpError(401, "Usuario ou senha invalidos.");
   }
+  clearLoginAttempt(db, attempt);
   const token = randomUUID();
   const expiresAt = new Date(Date.now() + sessionMaxAgeSeconds * 1000).toISOString();
   db.sessions.push({ token, userId: user.id, expiresAt, createdAt: nowIso() });
+  addAuditLog(db, request, "auth.login_success", { email }, user);
   await writeDb(db);
   response.setHeader("set-cookie", sessionCookieHeader(request, token));
   sendJson(response, 200, { user: publicUser(user) });
@@ -1422,8 +1523,10 @@ async function handleLogin(request, response) {
 
 async function handleLogout(request, response) {
   const db = await readDbWithBootstrap();
+  const user = sessionUser(db, request);
   const token = parseCookies(request)[sessionCookie];
   db.sessions = db.sessions.filter((session) => session.token !== token);
+  addAuditLog(db, request, "auth.logout", {}, user);
   await writeDb(db);
   response.setHeader("set-cookie", sessionCookieHeader(request, "", 0));
   sendJson(response, 200, { ok: true });
@@ -1503,6 +1606,7 @@ async function handleCreateClient(request, response) {
   };
 
   db.pairingTokens.push(token);
+  addAuditLog(db, request, "client.create_token", { clientId: client.id, resellerId: reseller.id, tokenId: token.id }, user);
   await writeDb(db);
 
   sendJson(response, 201, {
@@ -1548,6 +1652,7 @@ async function handleUpdateClient(request, response, clientId) {
   client.key = clientKey({ name, document });
   client.updatedAt = nowIso();
 
+  addAuditLog(db, request, "client.update", { clientId: client.id, resellerId: targetResellerId }, user);
   await writeDb(db);
   sendJson(response, 200, {
     client: publicClient(db, client)
@@ -1566,6 +1671,7 @@ async function handleSetClientStatus(request, response, clientId) {
   }
   client.status = status;
   client.updatedAt = nowIso();
+  addAuditLog(db, request, "client.status", { clientId: client.id, status }, user);
   await writeDb(db);
   sendJson(response, 200, {
     client: publicClient(db, client)
@@ -1597,6 +1703,7 @@ async function handleResetClientToken(request, response, clientId) {
   db.pairingTokens.push(token);
   client.status = "active";
   client.updatedAt = now;
+  addAuditLog(db, request, "client.token_reset", { clientId: client.id, tokenId: token.id }, user);
   await writeDb(db);
   sendJson(response, 201, {
     client: publicClient(db, client),
@@ -1620,6 +1727,7 @@ async function handleDeleteClient(request, response, clientId) {
   db.oauthCredentials = db.oauthCredentials.filter((credential) => !installationIds.has(credential.installationId));
   db.oauthStates = db.oauthStates.filter((state) => !installationIds.has(state.installationId));
   db.oauthEvents = db.oauthEvents.filter((event) => !installationIds.has(event.installationId));
+  addAuditLog(db, request, "client.delete", { clientId: client.id, installationIds: [...installationIds] }, user);
   await writeDb(db);
   sendJson(response, 200, { ok: true });
 }
@@ -1644,6 +1752,7 @@ async function handleUnpairInstallation(request, response, installationId) {
   db.oauthEvents = db.oauthEvents.filter((event) => event.installationId !== installation.installationId);
   const client = db.clients.find((item) => item.id === installation.clientId);
   if (client) client.updatedAt = now;
+  addAuditLog(db, request, "installation.unpair", { installationId: installation.installationId, clientId: installation.clientId }, user);
   await writeDb(db);
   sendJson(response, 200, {
     ok: true,
@@ -1661,6 +1770,7 @@ async function handleCreateReseller(request, response) {
   if (!reseller.document) {
     throw httpError(400, "Campo obrigatorio ausente: document.");
   }
+  addAuditLog(db, request, "reseller.upsert", { resellerId: reseller.id, document: reseller.document }, user);
   await writeDb(db);
   sendJson(response, 201, {
     reseller: publicReseller(reseller, db)
@@ -1697,6 +1807,7 @@ async function handleOAuthReset(request, response) {
     }
   }
   db.oauthEvents.push({ id: randomUUID(), type: "google_reset", installationId: installation.installationId, revoked, createdAt: now });
+  addAuditLog(db, request, "oauth.google_reset", { installationId: installation.installationId, revoked }, null);
   await writeDb(db);
   sendJson(response, 200, {
     ok: true,
@@ -1727,6 +1838,7 @@ async function handleOAuthStart(request, response) {
   };
   db.oauthStates.push(authState);
   db.oauthEvents.push({ id: randomUUID(), type: "google_start", installationId: installation.installationId, createdAt: nowIso() });
+  addAuditLog(db, request, "oauth.google_start", { installationId: installation.installationId, clientId: installation.clientId }, null);
   await writeDb(db);
 
   const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -1797,6 +1909,7 @@ async function handleOAuthCallback(request, response, url) {
   oauthState.status = "completed";
   oauthState.completedAt = nowIso();
   db.oauthEvents.push({ id: randomUUID(), type: "google_connected", installationId: installation.installationId, accountEmail: credential.accountEmail, createdAt: nowIso() });
+  addAuditLog(db, request, "oauth.google_connected", { installationId: installation.installationId, accountEmail: credential.accountEmail }, null);
   await writeDb(db);
 
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -1914,6 +2027,7 @@ async function handleCreateUser(request, response) {
       reseller.updatedAt = nowIso();
     }
   }
+  addAuditLog(db, request, "user.create", { userId: user.id, role, resellerId, allowedResellerIds: user.allowedResellerIds, permissions: user.permissions }, currentUser);
   await writeDb(db);
   sendJson(response, 201, {
     user: publicUser(user),
@@ -1937,6 +2051,7 @@ async function handleChangeOwnPassword(request, response) {
   user.passwordHash = hashPassword(newPassword);
   user.updatedAt = nowIso();
   db.sessions = db.sessions.filter((session) => session.userId !== user.id || session.token === parseCookies(request)[sessionCookie]);
+  addAuditLog(db, request, "user.password_change_own", { userId: user.id }, user);
   await writeDb(db);
   sendJson(response, 200, { ok: true, user: publicUser(user) });
 }
@@ -1960,6 +2075,7 @@ async function handleSetUserPassword(request, response, userId) {
   user.status = "active";
   user.updatedAt = nowIso();
   db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+  addAuditLog(db, request, "user.password_set", { userId: user.id }, currentUser);
   await writeDb(db);
   sendJson(response, 200, {
     ok: true,
@@ -2299,6 +2415,8 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/maintenance/update") {
     requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
+    addAuditLog(db, request, "maintenance.update_start", {}, user);
+    await writeDb(db);
     sendJson(response, 202, {
       ok: true,
       job: startMaintenanceUpdateJob()
@@ -2308,6 +2426,8 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/maintenance/backup") {
     requirePermission(user, permissions.maintenance, "Sem permissao para manutencao.");
+    addAuditLog(db, request, "maintenance.backup_start", {}, user);
+    await writeDb(db);
     sendJson(response, 202, {
       ok: true,
       job: startMaintenanceBackupJob()
@@ -2392,8 +2512,12 @@ const server = createServer(async (request, response) => {
 
     await serveStatic(request, response, decodeURIComponent(url.pathname));
   } catch (error) {
+    const status = error.status || 500;
+    const message = status >= 500 && process.env.NODE_ENV !== "development"
+      ? "Erro interno."
+      : redactSecrets(error.message || "Erro interno.");
     sendJson(response, error.status || 500, {
-      error: error.message || "Erro interno."
+      error: message
     });
   }
 });
