@@ -2362,6 +2362,40 @@ tr:last-child td {
   font-weight: 700;
 }
 
+.service-table {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.service-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.3fr) 92px minmax(74px, 0.6fr) minmax(160px, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+}
+
+.service-row strong,
+.service-row span,
+.service-row small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-row div span,
+.service-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (max-width: 1280px) {
   .app {
     padding: 22px;
@@ -2469,7 +2503,8 @@ tr:last-child td {
   .oauth-grid,
   .map-layout,
   .alert-row,
-  .client-form {
+  .client-form,
+  .service-row {
     grid-template-columns: 1fr;
   }
 
@@ -2551,6 +2586,10 @@ tr:last-child td {
 
   .topbar {
     align-items: flex-start;
+  }
+
+  .service-table {
+    padding: 10px;
   }
 
   .actions select {

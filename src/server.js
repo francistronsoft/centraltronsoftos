@@ -887,6 +887,7 @@ function upsertInstallation(db, client, payload) {
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
+    services: normalizeServiceInventory(payload, existing?.services || {}),
     backups: normalizeBackups(payload.backups || {}),
     metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
@@ -943,6 +944,7 @@ function upsertInstallationForClient(db, client, payload) {
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
+    services: normalizeServiceInventory(payload, existing?.services || {}),
     backups: normalizeBackups(payload.backups || {}),
     metrics: incomingMetrics(payload, existing?.metrics || {}),
     lastSeenAt: nowIso(),
@@ -970,6 +972,61 @@ function normalizeBackups(backups = {}) {
     next.quota = normalizeQuota(next.quota);
   }
   return next;
+}
+
+function normalizeServiceInventory(payload = {}, previous = {}) {
+  const source = payload.services && typeof payload.services === "object"
+    ? payload.services
+    : payload.apps || payload.containers
+      ? { apps: payload.apps || [], containers: payload.containers || [] }
+      : null;
+  if (!source) return previous && typeof previous === "object" ? previous : {};
+
+  const normalizeContainer = (container = {}) => {
+    if (typeof container === "string") {
+      return { name: container, status: "unknown", detail: "", image: "", imageTag: "", imageId: "", version: "", revision: "" };
+    }
+    return {
+      name: String(container.name || container.Names || "").replace(/^\/+/, ""),
+      status: String(container.status || container.State || "unknown").toLowerCase(),
+      detail: String(container.detail || container.Status || ""),
+      image: String(container.image || container.Image || ""),
+      imageTag: String(container.imageTag || ""),
+      imageId: String(container.imageId || container.ID || "").replace(/^sha256:/, "").slice(0, 12),
+      version: String(container.version || ""),
+      revision: String(container.revision || "").slice(0, 12)
+    };
+  };
+
+  const normalizeContainerSafe = (container = {}) => {
+    const next = normalizeContainer(container);
+    return next && next.name ? next : null;
+  };
+
+  const apps = Array.isArray(source.apps)
+    ? source.apps.map((app = {}) => ({
+        name: String(app.name || app.label || ""),
+        title: String(app.title || app.label || app.name || ""),
+        status: String(app.status || "unknown").toLowerCase(),
+        enabled: app.enabled !== false,
+        version: String(app.version || ""),
+        branch: String(app.branch || ""),
+        health: app.health && typeof app.health === "object" ? app.health : null,
+        containers: Array.isArray(app.containers) ? app.containers.map(normalizeContainerSafe).filter(Boolean).slice(0, 30) : []
+      })).filter((app) => app.name || app.title).slice(0, 30)
+    : [];
+
+  const containers = Array.isArray(source.containers)
+    ? source.containers.map(normalizeContainerSafe).filter(Boolean).slice(0, 80)
+    : [];
+
+  return {
+    ...source,
+    collectedAt: source.collectedAt || payload.collectedAt || nowIso(),
+    platform: String(source.platform || payload.agent?.type || payload.tronsoftos?.channel || ""),
+    apps,
+    containers
+  };
 }
 
 function normalizeQuota(quota = {}) {
@@ -1344,6 +1401,7 @@ function publicInstallation(db, installation) {
     database: installation.database,
     host: installation.host,
     cluster: installation.cluster || {},
+    services: installation.services || {},
     backups: normalizeBackups(installation.backups || {}),
     googleDrive: googleDriveCredential ? {
       accountEmail: googleDriveCredential.accountEmail || "",

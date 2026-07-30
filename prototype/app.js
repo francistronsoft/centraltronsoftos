@@ -590,6 +590,7 @@ async function loadCentralData() {
           backups: {},
           metrics: {},
           cluster: {},
+          services: {},
           status: client.status === "inactive" ? "inactive" : "unknown",
           lastSeen: "-",
           lastSeenAt: null,
@@ -619,6 +620,7 @@ async function loadCentralData() {
         googleDrive: installation.googleDrive || null,
         metrics: installation.metrics || {},
         cluster: installation.cluster || {},
+        services: installation.services || {},
         status: client.status === "inactive" ? "inactive" : installation.status,
         lastSeen: formatDateTime(installation.lastSeenAt),
         lastSeenAt: installation.lastSeenAt || null,
@@ -1952,6 +1954,95 @@ function renderBackupFiles(files = [], client = null) {
   `).join("");
 }
 
+function serviceStatusTone(status) {
+  const value = String(status || "").toLowerCase();
+  if (["running", "online", "healthy", "up"].includes(value)) return "online";
+  if (["exited", "stopped", "dead", "missing", "offline"].includes(value)) return "offline";
+  if (["degraded", "unhealthy", "restarting", "paused", "error"].includes(value)) return "warning";
+  return "unknown";
+}
+
+function serviceStatusLabel(status) {
+  const labels = {
+    running: "Ativo",
+    online: "Online",
+    healthy: "Saudavel",
+    up: "Ativo",
+    exited: "Parado",
+    stopped: "Parado",
+    dead: "Parado",
+    missing: "Ausente",
+    offline: "Offline",
+    degraded: "Degradado",
+    unhealthy: "Com falha",
+    restarting: "Reiniciando",
+    paused: "Pausado",
+    error: "Erro",
+    unknown: "Desconhecido"
+  };
+  const value = String(status || "unknown").toLowerCase();
+  return labels[value] || status || "Desconhecido";
+}
+
+function containerVersionLabel(container = {}) {
+  return container.version
+    || container.imageTag
+    || container.revision
+    || container.imageId
+    || "-";
+}
+
+function renderServiceInventory(services = {}, platform = "") {
+  const apps = Array.isArray(services.apps) ? services.apps : [];
+  const looseContainers = Array.isArray(services.containers) ? services.containers : [];
+  const hasInventory = apps.length > 0 || looseContainers.length > 0;
+  if (!hasInventory) {
+    const message = platform === "windows"
+      ? "O Agent Windows ainda nao informou containers WSL/Docker neste ambiente."
+      : "Nenhum inventario de containers recebido neste heartbeat.";
+    return `<p class="empty-note">${escapeHtml(message)}</p>`;
+  }
+
+  const rows = apps.length
+    ? apps.flatMap((app) => {
+        const containers = Array.isArray(app.containers) ? app.containers : [];
+        if (!containers.length) {
+          return [{
+            app: app.title || app.name || "Aplicacao",
+            name: app.name || app.title || "Aplicacao",
+            status: app.status || "unknown",
+            detail: app.health?.status ? `health ${app.health.status}` : "",
+            image: "",
+            version: app.version || app.branch || ""
+          }];
+        }
+        return containers.map((container) => ({
+          ...container,
+          app: app.title || app.name || "Aplicacao"
+        }));
+      })
+    : looseContainers.map((container) => ({ ...container, app: "WSL/Docker" }));
+
+  return `
+    <div class="service-table">
+      ${rows.slice(0, 40).map((container) => {
+        const tone = serviceStatusTone(container.status);
+        return `
+          <article class="service-row">
+            <div>
+              <strong>${escapeHtml(container.name || "container")}</strong>
+              <span>${escapeHtml(container.app || "-")}</span>
+            </div>
+            <span class="status ${escapeHtml(tone)}">${escapeHtml(serviceStatusLabel(container.status))}</span>
+            <span>${escapeHtml(containerVersionLabel(container))}</span>
+            <small>${escapeHtml(container.image || container.detail || "-")}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderClientAlerts(client) {
   const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && isVisibleAlert(alert)).slice(0, 8);
   if (alerts.length === 0) return `<p class="empty-note">Nenhum alerta recente para este cliente.</p>`;
@@ -1973,6 +2064,7 @@ function renderClientDetail(client) {
   const googleDrive = client.googleDrive || {};
   const metrics = client.metrics || {};
   const cluster = client.cluster || {};
+  const services = client.services || {};
   const platform = environmentPlatform(client);
   const supportsHa = platform !== "windows";
   const location = [client.city, client.state].filter(Boolean).join(" / ") || "-";
@@ -2057,6 +2149,16 @@ function renderClientDetail(client) {
             </div>
           </div>
           ${databaseGrowthChart(database)}
+        </article>
+
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Servicos e containers</h3>
+              <span>TronComanda, Retaguarda Web, gerente e WSL/Docker</span>
+            </div>
+          </div>
+          ${renderServiceInventory(services, platform)}
         </article>
       </div>
 

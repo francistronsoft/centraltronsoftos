@@ -275,6 +275,31 @@ Payload:
     "engine": "PostgreSQL",
     "version": "16.3",
     "schemaVersion": "2026.07.002"
+  },
+  "services": {
+    "platform": "linux-docker",
+    "apps": [
+      {
+        "name": "troncomanda",
+        "status": "online",
+        "containers": [
+          {
+            "name": "troncomanda_web",
+            "status": "running",
+            "image": "ghcr.io/tronsoft-solucoes/tron-comanda:main",
+            "version": "main"
+          }
+        ]
+      }
+    ],
+    "containers": [
+      {
+        "name": "wsl:Ubuntu",
+        "status": "running",
+        "image": "WSL",
+        "imageTag": "2"
+      }
+    ]
   }
 }
 ```
