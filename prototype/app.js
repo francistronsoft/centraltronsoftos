@@ -2039,20 +2039,27 @@ function renderServiceInventory(services = {}, platform = "") {
 
   return `
     <div class="service-table">
+      <div class="service-header" aria-hidden="true">
+        <span>Servico</span>
+        <span>Status</span>
+        <span>Versao</span>
+        <span>Imagem / detalhe</span>
+      </div>
       ${rows.slice(0, 40).map((container) => {
         const tone = serviceStatusTone(container.status);
         return `
           <article class="service-row">
-            <div>
+            <div class="service-name">
               <strong>${escapeHtml(container.name || "container")}</strong>
               <span>${escapeHtml(container.app || "-")}</span>
             </div>
             <span class="status ${escapeHtml(tone)}">${escapeHtml(serviceStatusLabel(container.status))}</span>
-            <span>${escapeHtml(containerVersionLabel(container))}</span>
-            <small>${escapeHtml(container.image || container.detail || "-")}</small>
+            <span class="service-version">${escapeHtml(containerVersionLabel(container))}</span>
+            <small class="service-detail">${escapeHtml(container.image || container.detail || "-")}</small>
           </article>
         `;
       }).join("")}
+      ${rows.length > 40 ? `<p class="empty-note">Exibindo 40 de ${rows.length} itens recebidos.</p>` : ""}
     </div>
   `;
 }
