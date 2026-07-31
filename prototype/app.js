@@ -2000,7 +2000,15 @@ function renderServiceInventory(services = {}, platform = "") {
     const message = platform === "windows"
       ? "O Agent Windows ainda nao informou containers WSL/Docker neste ambiente."
       : "Nenhum inventario de containers recebido neste heartbeat.";
-    return `<p class="empty-note">${escapeHtml(message)}</p>`;
+    const details = [
+      services.platform ? `origem: ${services.platform}` : "",
+      services.collectedAt ? `coleta: ${formatDateTime(services.collectedAt)}` : "",
+      services.detail || ""
+    ].filter(Boolean);
+    return `
+      <p class="empty-note">${escapeHtml(message)}</p>
+      ${details.length ? `<p class="empty-note">${escapeHtml(details.join(" | "))}</p>` : ""}
+    `;
   }
 
   const appContainerNames = new Set();

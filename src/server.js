@@ -993,10 +993,13 @@ function normalizeBackups(backups = {}) {
 }
 
 function normalizeServiceInventory(payload = {}, previous = {}) {
-  const source = payload.services && typeof payload.services === "object"
-    ? payload.services
-    : payload.apps || payload.containers
-      ? { apps: payload.apps || [], containers: payload.containers || [] }
+  const payloadServices = payload.services || payload.Services;
+  const payloadApps = payload.apps || payload.Apps;
+  const payloadContainers = payload.containers || payload.Containers;
+  const source = payloadServices && typeof payloadServices === "object"
+    ? payloadServices
+    : payloadApps || payloadContainers
+      ? { apps: payloadApps || [], containers: payloadContainers || [] }
       : null;
   if (!source) return previous && typeof previous === "object" ? previous : {};
 
@@ -1005,14 +1008,14 @@ function normalizeServiceInventory(payload = {}, previous = {}) {
       return { name: container, status: "unknown", detail: "", image: "", imageTag: "", imageId: "", version: "", revision: "" };
     }
     return {
-      name: String(container.name || container.Names || "").replace(/^\/+/, ""),
-      status: String(container.status || container.State || "unknown").toLowerCase(),
-      detail: String(container.detail || container.Status || ""),
+      name: String(container.name || container.Name || container.Names || "").replace(/^\/+/, ""),
+      status: String(container.status || container.StatusCode || container.State || container.ActiveState || "unknown").toLowerCase(),
+      detail: String(container.detail || container.Detail || container.Status || ""),
       image: String(container.image || container.Image || ""),
-      imageTag: String(container.imageTag || ""),
-      imageId: String(container.imageId || container.ID || "").replace(/^sha256:/, "").slice(0, 12),
-      version: String(container.version || ""),
-      revision: String(container.revision || "").slice(0, 12)
+      imageTag: String(container.imageTag || container.ImageTag || ""),
+      imageId: String(container.imageId || container.ImageId || container.ID || "").replace(/^sha256:/, "").slice(0, 12),
+      version: String(container.version || container.Version || ""),
+      revision: String(container.revision || container.Revision || "").slice(0, 12)
     };
   };
 
@@ -1021,27 +1024,31 @@ function normalizeServiceInventory(payload = {}, previous = {}) {
     return next && next.name ? next : null;
   };
 
-  const apps = Array.isArray(source.apps)
-    ? source.apps.map((app = {}) => ({
-        name: String(app.name || app.label || ""),
-        title: String(app.title || app.label || app.name || ""),
-        status: String(app.status || "unknown").toLowerCase(),
+  const sourceApps = source.apps || source.Apps;
+  const sourceContainers = source.containers || source.Containers;
+
+  const apps = Array.isArray(sourceApps)
+    ? sourceApps.map((app = {}) => ({
+        name: String(app.name || app.Name || app.label || app.Label || ""),
+        title: String(app.title || app.Title || app.label || app.Label || app.name || app.Name || ""),
+        status: String(app.status || app.Status || "unknown").toLowerCase(),
         enabled: app.enabled !== false,
-        version: String(app.version || ""),
-        branch: String(app.branch || ""),
-        health: app.health && typeof app.health === "object" ? app.health : null,
-        containers: Array.isArray(app.containers) ? app.containers.map(normalizeContainerSafe).filter(Boolean).slice(0, 30) : []
+        version: String(app.version || app.Version || ""),
+        branch: String(app.branch || app.Branch || ""),
+        health: app.health && typeof app.health === "object" ? app.health : app.Health && typeof app.Health === "object" ? app.Health : null,
+        containers: Array.isArray(app.containers || app.Containers) ? (app.containers || app.Containers).map(normalizeContainerSafe).filter(Boolean).slice(0, 30) : []
       })).filter((app) => app.name || app.title).slice(0, 30)
     : [];
 
-  const containers = Array.isArray(source.containers)
-    ? source.containers.map(normalizeContainerSafe).filter(Boolean).slice(0, 80)
+  const containers = Array.isArray(sourceContainers)
+    ? sourceContainers.map(normalizeContainerSafe).filter(Boolean).slice(0, 80)
     : [];
 
   return {
     ...source,
-    collectedAt: source.collectedAt || payload.collectedAt || nowIso(),
-    platform: String(source.platform || payload.agent?.type || payload.tronsoftos?.channel || ""),
+    collectedAt: source.collectedAt || source.CollectedAt || payload.collectedAt || payload.CollectedAt || nowIso(),
+    platform: String(source.platform || source.Platform || payload.agent?.type || payload.Agent?.type || payload.tronsoftos?.channel || payload.Tronsoftos?.channel || ""),
+    detail: String(source.detail || source.Detail || ""),
     apps,
     containers
   };
