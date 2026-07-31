@@ -328,6 +328,17 @@ async function enrichBackupStatus(status = {}) {
     };
   }
 
+  if (status.ok && status.file && isCentralBackupFile(statusFile) && isInsideDirectory(statusFile, directory) && Number(status.sizeBytes) > 0) {
+    return {
+      ...status,
+      file: statusFile,
+      fileName: status.fileName || basename(statusFile),
+      sizeBytes: Number(status.sizeBytes),
+      backupDir: directory,
+      downloadable: true
+    };
+  }
+
   const latest = await findLatestBackupFile(directory);
   if (!latest) {
     return {
@@ -369,19 +380,26 @@ async function downloadLatestBackup(response) {
     throw httpError(403, "Arquivo de backup fora do diretorio permitido.");
   }
 
-  const fileInfo = await stat(filePath).catch(() => null);
-  if (!fileInfo?.isFile()) {
-    throw httpError(404, "Arquivo de backup nao encontrado no servidor.");
-  }
-
   response.writeHead(200, {
     "content-type": "application/gzip",
-    "content-length": fileInfo.size,
+    ...(Number(status.sizeBytes) > 0 ? { "content-length": Number(status.sizeBytes) } : {}),
     "content-disposition": `attachment; filename="${fileName}"`,
     "cache-control": "no-store, max-age=0",
     "pragma": "no-cache"
   });
-  createReadStream(filePath).pipe(response);
+
+  const commandSpec = commandWithSudo(backupCommand, ["download"]);
+  const child = spawn(commandSpec.command, commandSpec.args, {
+    cwd: rootDir,
+    env: process.env,
+    windowsHide: true
+  });
+  child.stdout.pipe(response);
+  child.stderr.on("data", () => {});
+  child.on("error", () => response.destroy());
+  child.on("close", (code) => {
+    if (code !== 0) response.destroy();
+  });
 }
 
 function normalizeStatus(status) {

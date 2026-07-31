@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${CENTRAL_TRONSOFTOS_APP_DIR:-/opt/central-tronsoftos/app}"
 ENV_FILE="${CENTRAL_TRONSOFTOS_ENV_FILE:-/etc/central-tronsoftos/central.env}"
 SERVICE_NAME="${CENTRAL_TRONSOFTOS_SERVICE:-central-tronsoftos}"
+APP_USER="${CENTRAL_TRONSOFTOS_USER:-central-tronsoftos}"
 BACKUP_DIR="${CENTRAL_TRONSOFTOS_BACKUP_DIR:-/var/backups/central-tronsoftos}"
 RETENTION_DAYS="${CENTRAL_TRONSOFTOS_BACKUP_RETENTION_DAYS:-30}"
 RCLONE_REMOTE="${CENTRAL_TRONSOFTOS_BACKUP_RCLONE_REMOTE:-}"
@@ -33,13 +34,69 @@ latest_status() {
   local status_file="$BACKUP_DIR/latest.json"
   if [[ -f "$status_file" ]]; then
     cat "$status_file"
+  elif latest_archive="$(latest_backup_file)" && [[ -n "$latest_archive" ]]; then
+    backup_file_status "$latest_archive" "Arquivo mais recente localizado sem latest.json."
   else
     printf '{"ok":false,"message":"Nenhum backup registrado.","backupDir":"%s"}\n' "$(json_escape "$BACKUP_DIR")"
   fi
 }
 
+latest_backup_file() {
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'central-*.tar.gz' -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr \
+    | awk 'NR==1 { $1=""; sub(/^ /, ""); print }'
+}
+
+backup_file_status() {
+  local archive="${1:-}"
+  local message="${2:-}"
+  [[ -n "$archive" && -f "$archive" ]] || return 1
+  case "$archive" in
+    "$BACKUP_DIR"/central-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].tar.gz) ;;
+    *) return 1 ;;
+  esac
+  local size_bytes sha256 created_at
+  size_bytes="$(stat -c '%s' "$archive")"
+  created_at="$(date -u -r "$archive" +%Y-%m-%dT%H:%M:%SZ)"
+  sha256="$(sha256sum "$archive" | awk '{print $1}')"
+  cat <<EOF
+{
+  "ok": true,
+  "createdAt": "$(json_escape "$created_at")",
+  "file": "$(json_escape "$archive")",
+  "fileName": "$(json_escape "$(basename "$archive")")",
+  "sizeBytes": $size_bytes,
+  "sha256": "$(json_escape "$sha256")",
+  "backupDir": "$(json_escape "$BACKUP_DIR")",
+  "storage": "unknown",
+  "remoteStatus": "unknown",
+  "remote": "",
+  "remoteError": "",
+  "message": "$(json_escape "$message")"
+}
+EOF
+}
+
 if [[ "$MODE" == "status" || "$MODE" == "status-json" ]]; then
   latest_status
+  exit 0
+fi
+
+if [[ "$MODE" == "download" ]]; then
+  status_file="$BACKUP_DIR/latest.json"
+  archive=""
+  if [[ -f "$status_file" ]]; then
+    archive="$(node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(s.file || '')" "$status_file" 2>/dev/null || true)"
+  fi
+  if [[ -z "$archive" || ! -f "$archive" ]]; then
+    archive="$(latest_backup_file)"
+  fi
+  case "$archive" in
+    "$BACKUP_DIR"/central-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].tar.gz) ;;
+    *) fail "Arquivo de backup invalido para download." ;;
+  esac
+  [[ -f "$archive" ]] || fail "Backup nao encontrado para download."
+  cat "$archive"
   exit 0
 fi
 
@@ -57,6 +114,10 @@ remote_error=""
 
 mkdir -p "$work_dir"
 chmod 700 "$BACKUP_DIR" "$BACKUP_DIR/.work" "$work_dir" 2>/dev/null || true
+if id "$APP_USER" >/dev/null 2>&1; then
+  chgrp "$APP_USER" "$BACKUP_DIR" "$BACKUP_DIR/.work" "$work_dir" 2>/dev/null || true
+  chmod 750 "$BACKUP_DIR" "$BACKUP_DIR/.work" "$work_dir" 2>/dev/null || true
+fi
 
 cleanup() {
   rm -rf "$work_dir"
@@ -102,6 +163,10 @@ fi
 
 tar -C "$BACKUP_DIR/.work" -czf "$archive" "central-$timestamp"
 chmod 600 "$archive"
+if id "$APP_USER" >/dev/null 2>&1; then
+  chgrp "$APP_USER" "$archive" 2>/dev/null || true
+  chmod 640 "$archive" 2>/dev/null || true
+fi
 
 sha256="$(sha256sum "$archive" | awk '{print $1}')"
 size_bytes="$(stat -c '%s' "$archive")"
@@ -137,6 +202,9 @@ cat > "$status_file" <<EOF
 }
 EOF
 chmod 640 "$status_file" 2>/dev/null || true
+if id "$APP_USER" >/dev/null 2>&1; then
+  chgrp "$APP_USER" "$status_file" 2>/dev/null || true
+fi
 
 find "$BACKUP_DIR" -maxdepth 1 -type f -name 'central-*.tar.gz' -mtime +"$RETENTION_DAYS" -delete
 

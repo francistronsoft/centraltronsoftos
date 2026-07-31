@@ -41,7 +41,7 @@ EOF
 
 if id "$APP_USER" >/dev/null 2>&1; then
   cat > "/etc/sudoers.d/${SERVICE_NAME}-backup" <<EOF
-$APP_USER ALL=(root) NOPASSWD: $BACKUP_SCRIPT, $BACKUP_SCRIPT run, $BACKUP_SCRIPT status-json, $BACKUP_SCRIPT status
+$APP_USER ALL=(root) NOPASSWD: $BACKUP_SCRIPT, $BACKUP_SCRIPT run, $BACKUP_SCRIPT status-json, $BACKUP_SCRIPT status, $BACKUP_SCRIPT download
 EOF
   chmod 440 "/etc/sudoers.d/${SERVICE_NAME}-backup"
 fi
