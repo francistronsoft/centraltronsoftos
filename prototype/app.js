@@ -2003,25 +2003,31 @@ function renderServiceInventory(services = {}, platform = "") {
     return `<p class="empty-note">${escapeHtml(message)}</p>`;
   }
 
-  const rows = apps.length
-    ? apps.flatMap((app) => {
-        const containers = Array.isArray(app.containers) ? app.containers : [];
-        if (!containers.length) {
-          return [{
-            app: app.title || app.name || "Aplicacao",
-            name: app.name || app.title || "Aplicacao",
-            status: app.status || "unknown",
-            detail: app.health?.status ? `health ${app.health.status}` : "",
-            image: "",
-            version: app.version || app.branch || ""
-          }];
-        }
-        return containers.map((container) => ({
-          ...container,
-          app: app.title || app.name || "Aplicacao"
-        }));
-      })
-    : looseContainers.map((container) => ({ ...container, app: "WSL/Docker" }));
+  const appContainerNames = new Set();
+  const appRows = apps.flatMap((app) => {
+    const containers = Array.isArray(app.containers) ? app.containers : [];
+    if (!containers.length) {
+      return [{
+        app: app.title || app.name || "Aplicacao",
+        name: app.name || app.title || "Aplicacao",
+        status: app.status || "unknown",
+        detail: app.health?.status ? `health ${app.health.status}` : "",
+        image: "",
+        version: app.version || app.branch || ""
+      }];
+    }
+    return containers.map((container) => ({
+      ...container,
+      app: app.title || app.name || "Aplicacao"
+    }));
+  });
+  appRows.forEach((container) => {
+    if (container.name) appContainerNames.add(container.name);
+  });
+  const looseRows = looseContainers
+    .filter((container) => !container.name || !appContainerNames.has(container.name))
+    .map((container) => ({ ...container, app: services.platform || "WSL/Docker" }));
+  const rows = [...appRows, ...looseRows];
 
   return `
     <div class="service-table">
