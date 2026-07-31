@@ -2221,6 +2221,7 @@ async function handleHeartbeat(request, response) {
   resolveIndexAlertsIfHealthy(db, installation);
   installation.host = normalizedHostPayload(payload, installation);
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
+  installation.services = normalizeServiceInventory(payload, installation.services || {});
   installation.backups = normalizeBackups({ ...(installation.backups || {}), ...(payload.backups || {}) });
   installation.metrics = incomingMetrics(payload, installation.metrics || {});
   installation.lastSeenAt = nowIso();
