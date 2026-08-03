@@ -2047,6 +2047,92 @@ function networkLineChart(metrics = {}) {
   `;
 }
 
+function localNetworkLineChart(metrics = {}) {
+  const rows = networkMetricRows(metrics);
+  const gatewayLatencyPoints = networkSeriesValues(rows, ["gatewayLatencyMs", "gatewayPingMs", "lanLatencyMs", "localLatencyMs"]);
+  const centralLatencyPoints = networkSeriesValues(rows, ["centralLatencyMs", "centralPingMs"]);
+  const dnsLatencyPoints = networkSeriesValues(rows, ["dnsLatencyMs", "dnsLookupMs", "dnsMs"]);
+  const localLossPoints = networkSeriesValues(rows, ["gatewayPacketLossPercent", "gatewayLossPercent", "lanPacketLossPercent", "localPacketLossPercent"]);
+  const utilizationPoints = networkSeriesValues(rows, ["linkUtilizationPercent", "interfaceUtilizationPercent"]);
+  const errorPoints = rows.map((row) => {
+    const rxErrors = Number(row.rxErrorsPerSecond ?? row.receiveErrorsPerSecond ?? row.rxErrorRate ?? 0);
+    const txErrors = Number(row.txErrorsPerSecond ?? row.transmitErrorsPerSecond ?? row.txErrorRate ?? 0);
+    const rxDropped = Number(row.rxDroppedPerSecond ?? row.receiveDroppedPerSecond ?? row.rxDropRate ?? 0);
+    const txDropped = Number(row.txDroppedPerSecond ?? row.transmitDroppedPerSecond ?? row.txDropRate ?? 0);
+    const value = [rxErrors, txErrors, rxDropped, txDropped].filter(Number.isFinite).reduce((total, item) => total + item, 0);
+    return { value, label: row.label };
+  }).filter((point) => Number.isFinite(point.value) && point.value > 0);
+  const points = [gatewayLatencyPoints, centralLatencyPoints, dnsLatencyPoints, localLossPoints, utilizationPoints, errorPoints].sort((a, b) => b.length - a.length)[0] || [];
+  if (!gatewayLatencyPoints.length && !centralLatencyPoints.length && !dnsLatencyPoints.length && !localLossPoints.length && !utilizationPoints.length && !errorPoints.length) {
+    return `<div class="metric-empty performance-empty">sem serie historica de rede local</div>`;
+  }
+
+  const width = 720;
+  const height = 260;
+  const padding = { top: 24, right: 22, bottom: 36, left: 42 };
+  const latencyMax = Math.max(1, ...gatewayLatencyPoints.map((point) => point.value), ...centralLatencyPoints.map((point) => point.value), ...dnsLatencyPoints.map((point) => point.value));
+  const lossMax = Math.max(1, ...localLossPoints.map((point) => point.value), 100);
+  const utilizationMax = Math.max(1, ...utilizationPoints.map((point) => point.value), 100);
+  const errorMax = Math.max(1, ...errorPoints.map((point) => point.value));
+  const yTicks = [100, 75, 50, 25, 0];
+  const xTicks = points.length
+    ? [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, array) => array.indexOf(value) === index)
+    : [];
+  const gatewayPath = scaledMetricLinePath(gatewayLatencyPoints, width, height, padding, latencyMax);
+  const centralPath = scaledMetricLinePath(centralLatencyPoints, width, height, padding, latencyMax);
+  const dnsPath = scaledMetricLinePath(dnsLatencyPoints, width, height, padding, latencyMax);
+  const lossPath = scaledMetricLinePath(localLossPoints, width, height, padding, lossMax);
+  const utilizationPath = scaledMetricLinePath(utilizationPoints, width, height, padding, utilizationMax);
+  const errorPath = scaledMetricLinePath(errorPoints, width, height, padding, errorMax);
+  const gateway = gatewayLatencyPoints.length ? metricSummary(gatewayLatencyPoints) : null;
+  const central = centralLatencyPoints.length ? metricSummary(centralLatencyPoints) : null;
+  const dns = dnsLatencyPoints.length ? metricSummary(dnsLatencyPoints) : null;
+  const loss = localLossPoints.length ? metricSummary(localLossPoints) : null;
+  const utilization = utilizationPoints.length ? metricSummary(utilizationPoints) : null;
+  const errors = errorPoints.length ? metricSummary(errorPoints) : null;
+  const latest = rows[rows.length - 1] || {};
+
+  return `
+    <div class="performance-chart local-network-chart">
+      <div class="performance-legend">
+        <span><i class="gateway"></i>Gateway</span>
+        <span><i class="central"></i>Central</span>
+        <span><i class="dns"></i>DNS</span>
+        <span><i class="loss"></i>Perda</span>
+        <span><i class="utilization"></i>Uso link</span>
+        <span><i class="errors"></i>Erros</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de qualidade da rede local">
+        ${yTicks.map((tick) => {
+          const y = padding.top + ((100 - tick) / 100) * (height - padding.top - padding.bottom);
+          return `<g class="chart-grid"><line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}"></line><text x="${padding.left - 10}" y="${(y + 4).toFixed(1)}">${tick}</text></g>`;
+        }).join("")}
+        ${xTicks.map((index) => {
+          const x = padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * (width - padding.left - padding.right));
+          return `<g class="chart-x"><line x1="${x.toFixed(1)}" y1="${padding.top}" x2="${x.toFixed(1)}" y2="${height - padding.bottom}"></line><text x="${x.toFixed(1)}" y="${height - 12}">${escapeHtml(points[index]?.label || "")}</text></g>`;
+        }).join("")}
+        ${gatewayPath ? `<path class="chart-line gateway" d="${gatewayPath}"></path>` : ""}
+        ${centralPath ? `<path class="chart-line central" d="${centralPath}"></path>` : ""}
+        ${dnsPath ? `<path class="chart-line dns" d="${dnsPath}"></path>` : ""}
+        ${lossPath ? `<path class="chart-line loss" d="${lossPath}"></path>` : ""}
+        ${utilizationPath ? `<path class="chart-line utilization" d="${utilizationPath}"></path>` : ""}
+        ${errorPath ? `<path class="chart-line errors" d="${errorPath}"></path>` : ""}
+      </svg>
+    </div>
+    <div class="performance-stats">
+      <span>Gateway atual <strong>${escapeHtml(gateway ? `${gateway.latest.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>Pico gateway <strong>${escapeHtml(gateway ? `${gateway.peak.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>Central atual <strong>${escapeHtml(central ? `${central.latest.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>DNS atual <strong>${escapeHtml(dns ? `${dns.latest.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>Perda local <strong>${escapeHtml(loss ? `${loss.latest.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Uso do link <strong>${escapeHtml(utilization ? `${utilization.latest.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Erros/drops <strong>${escapeHtml(errors ? `${errors.latest.value.toFixed(1)}/s` : "-")}</strong></span>
+      <span>Velocidade link <strong>${escapeHtml(Number.isFinite(Number(latest.linkSpeedMbps)) ? `${Number(latest.linkSpeedMbps).toFixed(0)} Mbps` : "-")}</strong></span>
+      <span>Interface <strong>${escapeHtml(latest.interface || latest.interfaceName || "-")}</strong></span>
+    </div>
+  `;
+}
+
 function renderBackupFiles(files = [], client = null) {
   if (!Array.isArray(files) || files.length === 0) {
     return `<p class="empty-note">Nenhum arquivo de backup recente informado.</p>`;
@@ -2304,11 +2390,20 @@ function renderClientDetail(client) {
         <article class="ops-panel">
           <div class="ops-panel-head">
             <div>
-              <h3>Rede</h3>
-              <span>trafego, latencia e perda de pacotes</span>
+              <h3>Rede / Internet</h3>
+              <span>trafego, latencia e perda ate fora da loja</span>
             </div>
           </div>
           ${networkLineChart(metrics)}
+        </article>
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Rede local</h3>
+              <span>gateway, DNS, link e erros da interface</span>
+            </div>
+          </div>
+          ${localNetworkLineChart(metrics)}
         </article>
         <div class="temperature-card-wrap">${detailTemperaturePanel(client)}</div>
       </div>

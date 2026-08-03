@@ -1327,7 +1327,17 @@ function latestNetworkMetricRow(payload = {}, metrics = {}) {
     ?? source.sentBps;
   const latencyMs = source.latencyMs ?? source.pingMs ?? source.rttMs;
   const packetLossPercent = source.packetLossPercent ?? source.lossPercent ?? source.packetLoss;
+  const gatewayLatencyMs = source.gatewayLatencyMs ?? source.gatewayPingMs ?? source.lanLatencyMs ?? source.localLatencyMs;
+  const gatewayPacketLossPercent = source.gatewayPacketLossPercent ?? source.gatewayLossPercent ?? source.lanPacketLossPercent ?? source.localPacketLossPercent;
+  const dnsLatencyMs = source.dnsLatencyMs ?? source.dnsLookupMs ?? source.dnsMs;
+  const centralLatencyMs = source.centralLatencyMs ?? source.centralPingMs;
   const jitterMs = source.jitterMs;
+  const linkSpeedMbps = source.linkSpeedMbps ?? source.speedMbps ?? source.interfaceSpeedMbps;
+  const linkUtilizationPercent = source.linkUtilizationPercent ?? source.interfaceUtilizationPercent;
+  const rxErrorsPerSecond = source.rxErrorsPerSecond ?? source.receiveErrorsPerSecond ?? source.rxErrorRate;
+  const txErrorsPerSecond = source.txErrorsPerSecond ?? source.transmitErrorsPerSecond ?? source.txErrorRate;
+  const rxDroppedPerSecond = source.rxDroppedPerSecond ?? source.receiveDroppedPerSecond ?? source.rxDropRate;
+  const txDroppedPerSecond = source.txDroppedPerSecond ?? source.transmitDroppedPerSecond ?? source.txDropRate;
   const normalized = { collectedAt };
   const interfaceName = source.interface || source.interfaceName || source.nic || source.adapter;
   const target = source.target || source.probeTarget || source.host;
@@ -1337,7 +1347,17 @@ function latestNetworkMetricRow(payload = {}, metrics = {}) {
   if (Number.isFinite(Number(txBytesPerSecond))) normalized.txBytesPerSecond = Number(txBytesPerSecond);
   if (Number.isFinite(Number(latencyMs))) normalized.latencyMs = Number(latencyMs);
   if (Number.isFinite(Number(packetLossPercent))) normalized.packetLossPercent = Number(packetLossPercent);
+  if (Number.isFinite(Number(gatewayLatencyMs))) normalized.gatewayLatencyMs = Number(gatewayLatencyMs);
+  if (Number.isFinite(Number(gatewayPacketLossPercent))) normalized.gatewayPacketLossPercent = Number(gatewayPacketLossPercent);
+  if (Number.isFinite(Number(dnsLatencyMs))) normalized.dnsLatencyMs = Number(dnsLatencyMs);
+  if (Number.isFinite(Number(centralLatencyMs))) normalized.centralLatencyMs = Number(centralLatencyMs);
   if (Number.isFinite(Number(jitterMs))) normalized.jitterMs = Number(jitterMs);
+  if (Number.isFinite(Number(linkSpeedMbps))) normalized.linkSpeedMbps = Number(linkSpeedMbps);
+  if (Number.isFinite(Number(linkUtilizationPercent))) normalized.linkUtilizationPercent = Number(linkUtilizationPercent);
+  if (Number.isFinite(Number(rxErrorsPerSecond))) normalized.rxErrorsPerSecond = Number(rxErrorsPerSecond);
+  if (Number.isFinite(Number(txErrorsPerSecond))) normalized.txErrorsPerSecond = Number(txErrorsPerSecond);
+  if (Number.isFinite(Number(rxDroppedPerSecond))) normalized.rxDroppedPerSecond = Number(rxDroppedPerSecond);
+  if (Number.isFinite(Number(txDroppedPerSecond))) normalized.txDroppedPerSecond = Number(txDroppedPerSecond);
   if (typeof source.gatewayReachable === "boolean") normalized.gatewayReachable = source.gatewayReachable;
   if (typeof source.internetReachable === "boolean") normalized.internetReachable = source.internetReachable;
   return Object.keys(normalized).some((key) => key !== "collectedAt" && key !== "interface" && key !== "target")

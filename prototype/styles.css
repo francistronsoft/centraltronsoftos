@@ -1740,6 +1740,36 @@ tr.clickable-row:hover,
   stroke: #a78bfa;
 }
 
+.performance-legend .gateway,
+.chart-line.gateway {
+  background: #39c87a;
+  stroke: #39c87a;
+}
+
+.performance-legend .central,
+.chart-line.central {
+  background: #3b82f6;
+  stroke: #3b82f6;
+}
+
+.performance-legend .dns,
+.chart-line.dns {
+  background: #f2c15c;
+  stroke: #f2c15c;
+}
+
+.performance-legend .utilization,
+.chart-line.utilization {
+  background: #42c7ce;
+  stroke: #42c7ce;
+}
+
+.performance-legend .errors,
+.chart-line.errors {
+  background: #ef6b6b;
+  stroke: #ef6b6b;
+}
+
 .performance-chart svg {
   width: 100%;
   min-height: 220px;
