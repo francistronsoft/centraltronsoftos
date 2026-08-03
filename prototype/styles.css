@@ -1716,6 +1716,30 @@ tr.clickable-row:hover,
   background: #3b82f6;
 }
 
+.performance-legend .download,
+.chart-line.download {
+  background: #42c7ce;
+  stroke: #42c7ce;
+}
+
+.performance-legend .upload,
+.chart-line.upload {
+  background: #ef6b6b;
+  stroke: #ef6b6b;
+}
+
+.performance-legend .latency,
+.chart-line.latency {
+  background: #f2c15c;
+  stroke: #f2c15c;
+}
+
+.performance-legend .loss,
+.chart-line.loss {
+  background: #a78bfa;
+  stroke: #a78bfa;
+}
+
 .performance-chart svg {
   width: 100%;
   min-height: 220px;

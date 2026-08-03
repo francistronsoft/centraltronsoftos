@@ -1868,6 +1868,42 @@ function metricSummary(points) {
   return { peak, latest };
 }
 
+function bytesPerSecondLabel(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${bytesLabel(number)}/s`;
+}
+
+function networkMetricRows(metrics = {}) {
+  const network = metrics.network && typeof metrics.network === "object" ? metrics.network : {};
+  const latestRows = Array.isArray(network.latest) ? network.latest : network.latest ? [network.latest] : [];
+  const rows = Array.isArray(network.series) && network.series.length ? network.series : latestRows;
+  return rows.map((row) => {
+    const dateValue = row.createdAt || row.collectedAt || row.timestamp || row.time || row.readAt;
+    const date = dateValue ? new Date(dateValue) : null;
+    const label = date && Number.isFinite(date.getTime())
+      ? date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "sem horario";
+    return { ...row, label };
+  }).slice(-48);
+}
+
+function networkSeriesValues(rows = [], keys = []) {
+  return rows.map((row) => {
+    const value = keys.map((key) => Number(row[key])).find(Number.isFinite);
+    return { value, label: row.label };
+  }).filter((point) => Number.isFinite(point.value));
+}
+
+function scaledMetricLinePath(points, width, height, padding, maxValue) {
+  const scale = Number(maxValue);
+  const normalized = points.map((point) => ({
+    ...point,
+    value: scale > 0 ? (Number(point.value) / scale) * 100 : 0
+  }));
+  return metricLinePath(normalized, width, height, padding);
+}
+
 function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage = {}) {
   const cpuPoints = cpuValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
   const memoryPoints = memoryValues.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
@@ -1935,6 +1971,78 @@ function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage 
       <span>HD/SSD total <strong>${escapeHtml(bytesLabel(storage.total))}</strong></span>
       <span>Em uso <strong>${escapeHtml(storage.used !== null ? bytesLabel(storage.used) : storage.percent !== null ? `${storage.percent.toFixed(1)}%` : "-")}</strong></span>
       <span>Livre <strong>${escapeHtml(bytesLabel(storage.free))}</strong></span>
+    </div>
+  `;
+}
+
+function networkLineChart(metrics = {}) {
+  const rows = networkMetricRows(metrics);
+  const downloadPoints = networkSeriesValues(rows, ["rxBytesPerSecond", "downloadBytesPerSecond", "rxBps", "downloadBps"]);
+  const uploadPoints = networkSeriesValues(rows, ["txBytesPerSecond", "uploadBytesPerSecond", "txBps", "uploadBps"]);
+  const latencyPoints = networkSeriesValues(rows, ["latencyMs", "pingMs", "rttMs"]);
+  const lossPoints = networkSeriesValues(rows, ["packetLossPercent", "lossPercent", "packetLoss"]);
+  const points = [downloadPoints, uploadPoints, latencyPoints, lossPoints].sort((a, b) => b.length - a.length)[0] || [];
+  if (!downloadPoints.length && !uploadPoints.length && !latencyPoints.length && !lossPoints.length) {
+    return `<div class="metric-empty performance-empty">sem serie historica de rede</div>`;
+  }
+
+  const width = 720;
+  const height = 260;
+  const padding = { top: 24, right: 22, bottom: 36, left: 42 };
+  const trafficMax = Math.max(1, ...downloadPoints.map((point) => point.value), ...uploadPoints.map((point) => point.value));
+  const latencyMax = Math.max(1, ...latencyPoints.map((point) => point.value));
+  const lossMax = Math.max(1, ...lossPoints.map((point) => point.value), 100);
+  const yTicks = [100, 75, 50, 25, 0];
+  const xTicks = points.length
+    ? [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, array) => array.indexOf(value) === index)
+    : [];
+  const downloadPath = scaledMetricLinePath(downloadPoints, width, height, padding, trafficMax);
+  const uploadPath = scaledMetricLinePath(uploadPoints, width, height, padding, trafficMax);
+  const latencyPath = scaledMetricLinePath(latencyPoints, width, height, padding, latencyMax);
+  const lossPath = scaledMetricLinePath(lossPoints, width, height, padding, lossMax);
+  const download = downloadPoints.length ? metricSummary(downloadPoints) : null;
+  const upload = uploadPoints.length ? metricSummary(uploadPoints) : null;
+  const latency = latencyPoints.length ? metricSummary(latencyPoints) : null;
+  const loss = lossPoints.length ? metricSummary(lossPoints) : null;
+  const latest = rows[rows.length - 1] || {};
+  const reachability = [
+    latest.gatewayReachable === true ? "gateway ok" : latest.gatewayReachable === false ? "gateway falhou" : "",
+    latest.internetReachable === true ? "internet ok" : latest.internetReachable === false ? "internet falhou" : ""
+  ].filter(Boolean).join(" | ") || "-";
+
+  return `
+    <div class="performance-chart network-chart">
+      <div class="performance-legend">
+        <span><i class="download"></i>Download</span>
+        <span><i class="upload"></i>Upload</span>
+        <span><i class="latency"></i>Latencia</span>
+        <span><i class="loss"></i>Perda</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de desempenho da rede">
+        ${yTicks.map((tick) => {
+          const y = padding.top + ((100 - tick) / 100) * (height - padding.top - padding.bottom);
+          return `<g class="chart-grid"><line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}"></line><text x="${padding.left - 10}" y="${(y + 4).toFixed(1)}">${tick}</text></g>`;
+        }).join("")}
+        ${xTicks.map((index) => {
+          const x = padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * (width - padding.left - padding.right));
+          return `<g class="chart-x"><line x1="${x.toFixed(1)}" y1="${padding.top}" x2="${x.toFixed(1)}" y2="${height - padding.bottom}"></line><text x="${x.toFixed(1)}" y="${height - 12}">${escapeHtml(points[index]?.label || "")}</text></g>`;
+        }).join("")}
+        ${downloadPath ? `<path class="chart-line download" d="${downloadPath}"></path>` : ""}
+        ${uploadPath ? `<path class="chart-line upload" d="${uploadPath}"></path>` : ""}
+        ${latencyPath ? `<path class="chart-line latency" d="${latencyPath}"></path>` : ""}
+        ${lossPath ? `<path class="chart-line loss" d="${lossPath}"></path>` : ""}
+      </svg>
+    </div>
+    <div class="performance-stats">
+      <span>Download atual <strong>${escapeHtml(download ? bytesPerSecondLabel(download.latest.value) : "-")}</strong></span>
+      <span>Pico download <strong>${escapeHtml(download ? bytesPerSecondLabel(download.peak.value) : "-")}</strong></span>
+      <span>Upload atual <strong>${escapeHtml(upload ? bytesPerSecondLabel(upload.latest.value) : "-")}</strong></span>
+      <span>Pico upload <strong>${escapeHtml(upload ? bytesPerSecondLabel(upload.peak.value) : "-")}</strong></span>
+      <span>Latencia atual <strong>${escapeHtml(latency ? `${latency.latest.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>Pico latencia <strong>${escapeHtml(latency ? `${latency.peak.value.toFixed(0)} ms` : "-")}</strong></span>
+      <span>Perda atual <strong>${escapeHtml(loss ? `${loss.latest.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Interface <strong>${escapeHtml(latest.interface || latest.interfaceName || "-")}</strong></span>
+      <span>Alcance <strong>${escapeHtml(reachability)}</strong></span>
     </div>
   `;
 }
@@ -2192,6 +2300,15 @@ function renderClientDetail(client) {
             </div>
           </div>
           ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
+        </article>
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Rede</h3>
+              <span>trafego, latencia e perda de pacotes</span>
+            </div>
+          </div>
+          ${networkLineChart(metrics)}
         </article>
         <div class="temperature-card-wrap">${detailTemperaturePanel(client)}</div>
       </div>

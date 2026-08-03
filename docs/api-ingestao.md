@@ -276,6 +276,19 @@ Payload:
     "version": "16.3",
     "schemaVersion": "2026.07.002"
   },
+  "metrics": {
+    "network": {
+      "interface": "eth0",
+      "rxBytesPerSecond": 1250000,
+      "txBytesPerSecond": 430000,
+      "latencyMs": 18,
+      "packetLossPercent": 0,
+      "jitterMs": 4,
+      "gatewayReachable": true,
+      "internetReachable": true,
+      "collectedAt": "2026-08-03T12:00:00.000Z"
+    }
+  },
   "services": {
     "platform": "linux-docker",
     "apps": [

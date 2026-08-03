@@ -1302,6 +1302,49 @@ function latestSystemMetricRow(payload = {}, metrics = {}) {
   return Object.keys(normalized).length > 1 ? normalized : null;
 }
 
+function latestNetworkMetricRow(payload = {}, metrics = {}) {
+  const networkMetrics = metrics.network && typeof metrics.network === "object" ? metrics.network : {};
+  const payloadNetwork = payload.networkMetrics && typeof payload.networkMetrics === "object"
+    ? payload.networkMetrics
+    : payload.network && typeof payload.network === "object"
+      ? payload.network
+      : {};
+  const latest = Array.isArray(networkMetrics.latest) ? networkMetrics.latest[0] : networkMetrics.latest;
+  const row = latest && typeof latest === "object" ? { ...latest } : {};
+  const source = { ...payloadNetwork, ...networkMetrics, ...row };
+  const collectedAt = source.collectedAt || source.timestamp || source.time || metrics.collectedAt || nowIso();
+  const rxBytesPerSecond = source.rxBytesPerSecond
+    ?? source.downloadBytesPerSecond
+    ?? source.receiveBytesPerSecond
+    ?? source.rxBps
+    ?? source.downloadBps
+    ?? source.receivedBps;
+  const txBytesPerSecond = source.txBytesPerSecond
+    ?? source.uploadBytesPerSecond
+    ?? source.transmitBytesPerSecond
+    ?? source.txBps
+    ?? source.uploadBps
+    ?? source.sentBps;
+  const latencyMs = source.latencyMs ?? source.pingMs ?? source.rttMs;
+  const packetLossPercent = source.packetLossPercent ?? source.lossPercent ?? source.packetLoss;
+  const jitterMs = source.jitterMs;
+  const normalized = { collectedAt };
+  const interfaceName = source.interface || source.interfaceName || source.nic || source.adapter;
+  const target = source.target || source.probeTarget || source.host;
+  if (interfaceName) normalized.interface = String(interfaceName).slice(0, 80);
+  if (target) normalized.target = String(target).slice(0, 120);
+  if (Number.isFinite(Number(rxBytesPerSecond))) normalized.rxBytesPerSecond = Number(rxBytesPerSecond);
+  if (Number.isFinite(Number(txBytesPerSecond))) normalized.txBytesPerSecond = Number(txBytesPerSecond);
+  if (Number.isFinite(Number(latencyMs))) normalized.latencyMs = Number(latencyMs);
+  if (Number.isFinite(Number(packetLossPercent))) normalized.packetLossPercent = Number(packetLossPercent);
+  if (Number.isFinite(Number(jitterMs))) normalized.jitterMs = Number(jitterMs);
+  if (typeof source.gatewayReachable === "boolean") normalized.gatewayReachable = source.gatewayReachable;
+  if (typeof source.internetReachable === "boolean") normalized.internetReachable = source.internetReachable;
+  return Object.keys(normalized).some((key) => key !== "collectedAt" && key !== "interface" && key !== "target")
+    ? normalized
+    : null;
+}
+
 function incomingMetrics(payload = {}, previousMetrics = {}) {
   const metrics = payload.metrics && typeof payload.metrics === "object" ? payload.metrics : {};
   const systemMetrics = payload.systemMetrics && typeof payload.systemMetrics === "object" ? payload.systemMetrics : {};
@@ -1327,6 +1370,17 @@ function incomingMetrics(payload = {}, previousMetrics = {}) {
     next.diskUsedBytes = row.diskUsedBytes ?? next.diskUsedBytes ?? previousMetrics.diskUsedBytes;
     next.diskFreeBytes = row.diskFreeBytes ?? next.diskFreeBytes ?? previousMetrics.diskFreeBytes;
     next.temperatureCelsius = row.temperatureCelsius ?? next.temperatureCelsius ?? previousMetrics.temperatureCelsius;
+  }
+  const networkRow = latestNetworkMetricRow(payload, next);
+  if (networkRow) {
+    const previousNetwork = previousMetrics.network && typeof previousMetrics.network === "object" ? previousMetrics.network : {};
+    const previousNetworkSeries = Array.isArray(previousNetwork.series) ? previousNetwork.series : [];
+    next.network = {
+      ...previousNetwork,
+      ...(next.network || {}),
+      latest: networkRow,
+      series: [...previousNetworkSeries, networkRow].slice(-maxMetricSeries)
+    };
   }
   return next;
 }

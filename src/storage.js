@@ -43,11 +43,18 @@ function compactMetricSeries(metrics = {}) {
   if (!metrics || typeof metrics !== "object") return {};
   const next = { ...metrics };
   const systemMetrics = next.systemMetrics && typeof next.systemMetrics === "object" ? { ...next.systemMetrics } : null;
+  const networkMetrics = next.network && typeof next.network === "object" ? { ...next.network } : null;
   if (systemMetrics) {
     if (Array.isArray(systemMetrics.series)) {
       systemMetrics.series = systemMetrics.series.slice(-maxMetricSeries);
     }
     next.systemMetrics = systemMetrics;
+  }
+  if (networkMetrics) {
+    if (Array.isArray(networkMetrics.series)) {
+      networkMetrics.series = networkMetrics.series.slice(-maxMetricSeries);
+    }
+    next.network = networkMetrics;
   }
   if (Array.isArray(next.series)) {
     next.series = next.series.slice(-maxMetricSeries);
