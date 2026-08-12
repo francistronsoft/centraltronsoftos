@@ -1926,6 +1926,64 @@ tr.clickable-row:hover,
   gap: 8px;
 }
 
+.database-list,
+.database-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.database-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  border: 1px solid var(--ops-line);
+  border-left: 4px solid #42c7ce;
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ops-panel-strong);
+}
+
+.database-row.warning {
+  border-left-color: #e1a23a;
+}
+
+.database-row.offline {
+  border-left-color: #ef6b6b;
+}
+
+.database-row.online {
+  border-left-color: #39c87a;
+}
+
+.database-row > div,
+.database-history-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.database-row span,
+.database-row small,
+.database-history-title span {
+  color: var(--ops-muted);
+  font-size: 12px;
+}
+
+.database-row strong,
+.database-history-title strong {
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+
+.database-history-block {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ops-panel);
+}
+
 .index-audit-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2595,7 +2653,8 @@ tr:last-child td {
   .alert-row,
   .client-form,
   .service-header,
-  .service-row {
+  .service-row,
+  .database-row {
     grid-template-columns: 1fr;
   }
 

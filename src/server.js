@@ -890,18 +890,8 @@ function upsertInstallation(db, client, payload) {
       channel: payload.tronsoftos?.channel || ""
     },
     database: {
-      engine: payload.database?.engine || "",
-      version: payload.database?.version || "",
-      schemaVersion: payload.database?.schemaVersion || "",
-      versaoBanco: payload.database?.versaoBanco || payload.database?.versao_banco || payload.database?.schemaVersion || "",
-      sizeMb: payload.database?.sizeMb ?? null,
-      fileSizeBytes: payload.database?.fileSizeBytes ?? null,
-      databaseName: payload.database?.databaseName || "",
-      databaseAlias: payload.database?.databaseAlias || payload.database?.alias || "",
-      indexHealth: payload.database?.indexHealth ?? null,
-      indexAudit: normalizeIndexAudit(payload.database?.indexAudit, existing?.database?.indexAudit),
-      indexAuditHistory: existing?.database?.indexAuditHistory || [],
-      history: existing?.database?.history || []
+      ...normalizeDatabasePayload(payload.database, existing?.database),
+      databases: normalizeDatabasesPayload(payload.database?.databases || payload.databases, existing?.database?.databases)
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
@@ -917,12 +907,14 @@ function upsertInstallation(db, client, payload) {
     Object.assign(existing, installation);
     appendDatabaseHistory(existing);
     appendIndexAuditHistory(existing);
+    appendDatabasesHistory(existing);
     return existing;
   }
 
   db.installations.push(installation);
   appendDatabaseHistory(installation);
   appendIndexAuditHistory(installation);
+  appendDatabasesHistory(installation);
   return installation;
 }
 
@@ -947,18 +939,8 @@ function upsertInstallationForClient(db, client, payload) {
       channel: payload.tronsoftos?.channel || ""
     },
     database: {
-      engine: payload.database?.engine || "",
-      version: payload.database?.version || "",
-      schemaVersion: payload.database?.schemaVersion || "",
-      versaoBanco: payload.database?.versaoBanco || payload.database?.versao_banco || payload.database?.schemaVersion || "",
-      sizeMb: payload.database?.sizeMb ?? null,
-      fileSizeBytes: payload.database?.fileSizeBytes ?? null,
-      databaseName: payload.database?.databaseName || "",
-      databaseAlias: payload.database?.databaseAlias || payload.database?.alias || "",
-      indexHealth: payload.database?.indexHealth ?? null,
-      indexAudit: normalizeIndexAudit(payload.database?.indexAudit, existing?.database?.indexAudit),
-      indexAuditHistory: existing?.database?.indexAuditHistory || [],
-      history: existing?.database?.history || []
+      ...normalizeDatabasePayload(payload.database, existing?.database),
+      databases: normalizeDatabasesPayload(payload.database?.databases || payload.databases, existing?.database?.databases)
     },
     host: normalizedHostPayload(payload, existing),
     cluster: payload.cluster || {},
@@ -974,12 +956,14 @@ function upsertInstallationForClient(db, client, payload) {
     Object.assign(existing, installation);
     appendDatabaseHistory(existing);
     appendIndexAuditHistory(existing);
+    appendDatabasesHistory(existing);
     return existing;
   }
 
   db.installations.push(installation);
   appendDatabaseHistory(installation);
   appendIndexAuditHistory(installation);
+  appendDatabasesHistory(installation);
   return installation;
 }
 
@@ -1195,6 +1179,51 @@ function normalizeIndexAudit(audit = null, previous = null) {
   };
 }
 
+function databaseIdentity(database = {}) {
+  return String(database.databaseAlias || database.alias || database.id || database.databaseName || database.name || "").trim().toLowerCase();
+}
+
+function normalizeDatabasePayload(database = {}, previous = {}) {
+  const source = database && typeof database === "object" ? database : {};
+  const existing = previous && typeof previous === "object" ? previous : {};
+  const versaoBanco = source.versaoBanco
+    || source.versao_banco
+    || source.schemaVersion
+    || source.schema_version
+    || source.version
+    || "";
+  return {
+    id: source.id || existing.id || "",
+    engine: source.engine || existing.engine || "",
+    version: source.version || existing.version || "",
+    schemaVersion: source.schemaVersion || source.schema_version || versaoBanco || "",
+    versaoBanco,
+    sizeMb: source.sizeMb ?? existing.sizeMb ?? null,
+    fileSizeBytes: source.fileSizeBytes ?? existing.fileSizeBytes ?? null,
+    databaseName: source.databaseName || source.name || existing.databaseName || "",
+    databaseAlias: source.databaseAlias || source.alias || existing.databaseAlias || "",
+    alias: source.alias || source.databaseAlias || existing.alias || existing.databaseAlias || "",
+    name: source.name || source.databaseName || existing.name || existing.databaseName || "",
+    pathRole: source.pathRole || existing.pathRole || "",
+    ok: source.ok ?? existing.ok ?? null,
+    licensedUnit: source.licensedUnit || existing.licensedUnit || "",
+    error: source.error || "",
+    indexHealth: source.indexHealth ?? existing.indexHealth ?? null,
+    indexAudit: normalizeIndexAudit(source.indexAudit, existing.indexAudit),
+    indexAuditHistory: existing.indexAuditHistory || [],
+    history: existing.history || []
+  };
+}
+
+function normalizeDatabasesPayload(databases = [], previous = []) {
+  const previousList = Array.isArray(previous) ? previous : [];
+  if (!Array.isArray(databases)) return previousList;
+  const previousByKey = new Map(previousList.map(db => [databaseIdentity(db), db]).filter(([key]) => key));
+  return databases
+    .filter(db => db && typeof db === "object")
+    .map(db => normalizeDatabasePayload(db, previousByKey.get(databaseIdentity(db)) || {}));
+}
+
 function appendIndexAuditHistory(installation) {
   const audit = installation.database?.indexAudit;
   if (!audit || typeof audit !== "object") return;
@@ -1248,6 +1277,63 @@ function appendDatabaseHistory(installation) {
   }
   history.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   installation.database.history = history.slice(-370);
+}
+
+function appendDatabaseItemHistory(database = {}) {
+  const sizeMb = databaseSizeMb(database);
+  if (!Number.isFinite(sizeMb)) return database;
+
+  const sampledAt = nowIso();
+  const day = sampledAt.slice(0, 10);
+  const history = Array.isArray(database.history)
+    ? database.history.filter((item) => item && item.date && Number.isFinite(Number(item.sizeMb)))
+    : [];
+  const existing = history.find((item) => item.date === day);
+  if (existing) {
+    existing.sizeMb = sizeMb;
+    existing.sampledAt = sampledAt;
+  } else {
+    history.push({ date: day, sizeMb, sampledAt });
+  }
+  history.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  database.history = history.slice(-370);
+  return database;
+}
+
+function appendIndexAuditItemHistory(database = {}) {
+  const audit = database.indexAudit;
+  if (!audit || typeof audit !== "object") return database;
+  if (!Number.isFinite(Number(audit.inactiveIndexes))) return database;
+
+  const history = Array.isArray(database.indexAuditHistory)
+    ? database.indexAuditHistory.filter((item) => item && item.checkedAt)
+    : [];
+  const last = history.at(-1);
+  const changed = !last
+    || Number(last.inactiveIndexes) !== Number(audit.inactiveIndexes)
+    || Number(last.activeIndexes) !== Number(audit.activeIndexes)
+    || Number(last.totalIndexes) !== Number(audit.totalIndexes);
+  if (!changed) return database;
+
+  history.push({
+    checkedAt: audit.checkedAt || nowIso(),
+    totalIndexes: audit.totalIndexes,
+    activeIndexes: audit.activeIndexes,
+    inactiveIndexes: audit.inactiveIndexes,
+    inactiveDelta: audit.inactiveDelta || 0,
+    newInactiveIndexes: Array.isArray(audit.newInactiveIndexes) ? audit.newInactiveIndexes.slice(0, 20) : [],
+    reactivatedIndexes: Array.isArray(audit.reactivatedIndexes) ? audit.reactivatedIndexes.slice(0, 20) : []
+  });
+  database.indexAuditHistory = history.slice(-60);
+  return database;
+}
+
+function appendDatabasesHistory(installation) {
+  const databases = Array.isArray(installation.database?.databases) ? installation.database.databases : [];
+  databases.forEach((database) => {
+    appendDatabaseItemHistory(database);
+    appendIndexAuditItemHistory(database);
+  });
 }
 
 function latestSystemMetricRow(payload = {}, metrics = {}) {
@@ -2283,15 +2369,13 @@ async function handleHeartbeat(request, response) {
 
   installation.status = normalizeStatus(payload.status || "online");
   installation.tronsoftos = { ...installation.tronsoftos, ...payload.tronsoftos };
-  installation.database = { ...installation.database, ...payload.database };
-  installation.database.indexAudit = normalizeIndexAudit(payload.database?.indexAudit, installation.database.indexAudit);
-  installation.database.versaoBanco = payload.database?.versaoBanco
-    || payload.database?.versao_banco
-    || payload.database?.schemaVersion
-    || installation.database.versaoBanco
-    || "";
+  installation.database = {
+    ...normalizeDatabasePayload({ ...(installation.database || {}), ...(payload.database || {}) }, installation.database),
+    databases: normalizeDatabasesPayload(payload.database?.databases || payload.databases, installation.database?.databases)
+  };
   appendDatabaseHistory(installation);
   appendIndexAuditHistory(installation);
+  appendDatabasesHistory(installation);
   resolveIndexAlertsIfHealthy(db, installation);
   installation.host = normalizedHostPayload(payload, installation);
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };

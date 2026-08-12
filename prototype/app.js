@@ -1507,9 +1507,14 @@ function isVisibleAlert(alert = {}) {
   return !isRcloneAlert(alert) && !isCommonIndexAlert(alert);
 }
 
-function indexHealthStatus(client) {
-  const health = client.databaseInfo?.indexHealth;
-  const audit = client.databaseInfo?.indexAudit;
+function monitoredDatabases(databaseInfo = {}) {
+  const databases = Array.isArray(databaseInfo.databases) ? databaseInfo.databases.filter(Boolean) : [];
+  return databases.length ? databases : [databaseInfo].filter((database) => database && Object.keys(database).length);
+}
+
+function indexHealthStatusForDatabase(databaseInfo = {}, client = {}) {
+  const health = databaseInfo?.indexHealth;
+  const audit = databaseInfo?.indexAudit;
   const alert = currentAlerts.find((item) => {
     const text = `${item.code || ""} ${item.title || ""} ${item.message || ""}`.toLowerCase();
     return item.clientId === client.id
@@ -1584,6 +1589,38 @@ function indexHealthStatus(client) {
     return { label: "Indices nao verificados", shortLabel: "Sem leitura", tone: "warning", detail: `${active} ativo(s)` };
   }
   return { label: "Nao informado", shortLabel: "Sem leitura", tone: "unknown", detail: "sem leitura do TronFire" };
+}
+
+function indexHealthStatus(client) {
+  const databases = monitoredDatabases(client.databaseInfo);
+  if (databases.length <= 1) return indexHealthStatusForDatabase(databases[0] || client.databaseInfo || {}, client);
+  const statuses = databases.map((database) => indexHealthStatusForDatabase(database, client));
+  const offline = statuses.filter((status) => status.tone === "offline").length;
+  const warning = statuses.filter((status) => status.tone === "warning").length;
+  const unknown = statuses.filter((status) => status.tone === "unknown").length;
+  const ok = statuses.filter((status) => status.tone === "online").length;
+  if (offline || warning) {
+    return {
+      label: "Banco em atencao",
+      shortLabel: "Atencao",
+      tone: offline ? "offline" : "warning",
+      detail: `${databases.length} banco(s), ${offline + warning} com atencao`
+    };
+  }
+  if (ok === databases.length) {
+    return {
+      label: "Bancos OK",
+      shortLabel: "OK",
+      tone: "online",
+      detail: `${databases.length} banco(s) monitorado(s)`
+    };
+  }
+  return {
+    label: "Indices nao verificados",
+    shortLabel: "Sem leitura",
+    tone: "warning",
+    detail: `${databases.length} banco(s), ${unknown} sem leitura`
+  };
 }
 
 function detailItem(label, value) {
@@ -1661,6 +1698,69 @@ function indexAuditDetail(database = {}) {
   return `${inactive} inativo(s)${delta > 0 ? `, +${delta} novo(s)` : ""}${checkedAt ? ` em ${checkedAt}` : ""}`;
 }
 
+function databaseDisplayName(database = {}) {
+  return database.databaseName || database.name || database.databaseAlias || database.alias || "Banco Firebird";
+}
+
+function databaseDisplayAlias(database = {}) {
+  return database.databaseAlias || database.alias || database.id || "";
+}
+
+function renderDatabaseSummary(databaseInfo = {}, client = {}) {
+  const databases = monitoredDatabases(databaseInfo);
+  if (databases.length <= 1) {
+    const database = databases[0] || databaseInfo || {};
+    const indexStatus = indexHealthStatusForDatabase(database, client);
+    return `
+      <div class="detail-grid compact">
+        ${detailItem("Engine", database.engine || "Firebird")}
+        ${detailItem("Firebird", database.version)}
+        ${detailItem("versao_banco", database.versaoBanco || database.versao_banco || database.schemaVersion || client.database)}
+        ${detailItem("Tamanho", databaseSizeLabel(database))}
+        ${detailItem("Indices", indexStatus.label)}
+        ${detailItem("Detalhe indice", indexStatus.detail)}
+        ${detailItem("Auditoria indice", indexAuditDetail(database))}
+        ${detailItem("Alias", databaseDisplayAlias(database))}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="database-list">
+      ${databases.map((database) => {
+        const indexStatus = indexHealthStatusForDatabase(database, client);
+        const checkedAt = database.indexHealth?.checkedAt || database.indexAudit?.checkedAt || "";
+        return `
+          <article class="database-row ${escapeHtml(indexStatus.tone)}">
+            <div>
+              <strong>${escapeHtml(databaseDisplayName(database))}</strong>
+              <span>${escapeHtml(databaseDisplayAlias(database) || "alias nao informado")}</span>
+            </div>
+            <div>
+              <span>versao_banco</span>
+              <strong>${escapeHtml(database.versaoBanco || database.versao_banco || database.schemaVersion || database.version || "-")}</strong>
+            </div>
+            <div>
+              <span>Tamanho</span>
+              <strong>${escapeHtml(databaseSizeLabel(database))}</strong>
+            </div>
+            <div>
+              <span>Indices</span>
+              <strong>${escapeHtml(indexStatus.shortLabel || indexStatus.label)}</strong>
+              <small>${escapeHtml(indexStatus.detail)}</small>
+            </div>
+            <div>
+              <span>Auditoria</span>
+              <strong>${escapeHtml(indexAuditDetail(database))}</strong>
+              <small>${escapeHtml(checkedAt ? formatDateTime(checkedAt) : "")}</small>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderIndexNames(names = [], emptyText = "sem itens") {
   if (!Array.isArray(names) || names.length === 0) {
     return `<span class="index-audit-empty">${escapeHtml(emptyText)}</span>`;
@@ -1708,6 +1808,24 @@ function renderIndexAuditHistory(database = {}) {
           </article>
         `;
       }).join("")}
+    </div>
+  `;
+}
+
+function renderDatabasesIndexAuditHistory(databaseInfo = {}) {
+  const databases = monitoredDatabases(databaseInfo);
+  if (databases.length <= 1) return renderIndexAuditHistory(databases[0] || databaseInfo);
+  return `
+    <div class="database-history-list">
+      ${databases.map((database) => `
+        <article class="database-history-block">
+          <div class="database-history-title">
+            <strong>${escapeHtml(databaseDisplayName(database))}</strong>
+            <span>${escapeHtml(databaseDisplayAlias(database) || "alias nao informado")}</span>
+          </div>
+          ${renderIndexAuditHistory(database)}
+        </article>
+      `).join("")}
     </div>
   `;
 }
@@ -2411,17 +2529,8 @@ function renderClientDetail(client) {
 
     <section class="ops-grid">
       <article class="ops-panel ops-panel-wide">
-        <div class="ops-panel-head"><h3>Banco de dados</h3></div>
-        <div class="detail-grid compact">
-          ${detailItem("Engine", database.engine || "Firebird")}
-          ${detailItem("Firebird", database.version)}
-          ${detailItem("versao_banco", client.database)}
-          ${detailItem("Tamanho", databaseSize)}
-          ${detailItem("Indices", indexStatus.label)}
-          ${detailItem("Detalhe indice", indexStatus.detail)}
-          ${detailItem("Auditoria indice", indexAuditDetail(database))}
-          ${detailItem("Alias", database.alias || database.databaseAlias)}
-        </div>
+        <div class="ops-panel-head"><h3>Bancos Firebird</h3></div>
+        ${renderDatabaseSummary(database, client)}
       </article>
     </section>
 
@@ -2433,7 +2542,7 @@ function renderClientDetail(client) {
             <span>mudancas detectadas pelo agente</span>
           </div>
         </div>
-        ${renderIndexAuditHistory(database)}
+        ${renderDatabasesIndexAuditHistory(database)}
       </article>
     </section>
 
