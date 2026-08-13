@@ -2580,8 +2580,11 @@ function renderClientDetail(client) {
           </div>
           ${localNetworkLineChart(metrics)}
         </article>
-        <div class="temperature-card-wrap">${detailTemperaturePanel(client)}</div>
       </div>
+    </section>
+
+    <section class="ops-grid">
+      <div class="temperature-card-wrap ops-panel-wide">${detailTemperaturePanel(client)}</div>
     </section>
 
     <section class="ops-grid">

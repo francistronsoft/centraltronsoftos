@@ -928,7 +928,7 @@ p {
 }
 
 .temperature-card-wrap {
-  max-width: 520px;
+  width: 100%;
 }
 
 .client-avatar {
@@ -1829,6 +1829,10 @@ tr.clickable-row:hover,
 .temperature-panel {
   display: grid;
   gap: 12px;
+}
+
+.temperature-chart svg {
+  min-height: 180px;
 }
 
 .performance-stats {
