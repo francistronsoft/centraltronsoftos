@@ -1770,6 +1770,12 @@ tr.clickable-row:hover,
   stroke: #ef6b6b;
 }
 
+.performance-legend .temperature,
+.chart-line.temperature {
+  background: #ef6b6b;
+  stroke: #ef6b6b;
+}
+
 .performance-chart svg {
   width: 100%;
   min-height: 220px;
@@ -1818,6 +1824,11 @@ tr.clickable-row:hover,
 
 .chart-line.disk {
   stroke: #3b82f6;
+}
+
+.temperature-panel {
+  display: grid;
+  gap: 12px;
 }
 
 .performance-stats {

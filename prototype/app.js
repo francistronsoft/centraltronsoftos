@@ -969,6 +969,17 @@ function temperatureStatus(client) {
   return { label, tone: "online", detail: "ok" };
 }
 
+function temperatureSeriesValues(metrics = {}) {
+  return metricSeriesValues(metrics, [
+    "temperatureCelsius",
+    "temperature",
+    "temperatureC",
+    "tempCelsius",
+    "cpuTemperature",
+    "cpuTempCelsius"
+  ]).filter((point) => point.value > 0 && point.value < 130);
+}
+
 function backupSummary(installation) {
   const backups = installation?.backups || {};
   const latest = backups.latestValidatedBackupAt
@@ -1832,19 +1843,23 @@ function renderDatabasesIndexAuditHistory(databaseInfo = {}) {
 
 function detailTemperaturePanel(client) {
   const temperature = temperatureStatus(client);
+  const series = temperatureSeriesValues(client?.metrics || {});
+  const current = temperatureValue(client);
   return `
     <article class="ops-panel temperature-panel">
       <div class="ops-panel-head">
         <div>
           <h3>Temperatura</h3>
-          <span>leitura termica do servidor</span>
+          <span>historico da leitura termica do servidor</span>
         </div>
+        <span class="ops-chip ${escapeHtml(temperature.tone)}">${escapeHtml(temperature.label === "-" ? "sem sensor" : temperature.label)}</span>
       </div>
       <div class="temperature-detail ${escapeHtml(temperature.tone)}">
         <span>Sensor</span>
         <strong>${escapeHtml(temperature.label === "-" ? "Sem sensor" : temperature.label)}</strong>
         <small>${escapeHtml(temperature.detail)}</small>
       </div>
+      ${temperatureLineChart(series, current)}
     </article>
   `;
 }
@@ -2020,6 +2035,48 @@ function scaledMetricLinePath(points, width, height, padding, maxValue) {
     value: scale > 0 ? (Number(point.value) / scale) * 100 : 0
   }));
   return metricLinePath(normalized, width, height, padding);
+}
+
+function temperatureLineChart(values = [], current = null) {
+  let points = values.map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point);
+  if (!points.length && current !== null && Number.isFinite(Number(current))) {
+    points = [{ value: Number(current), label: "leitura atual" }, { value: Number(current), label: "leitura atual" }];
+  }
+  if (!points.length) {
+    return `<div class="metric-empty performance-empty">sem serie historica de temperatura</div>`;
+  }
+
+  const width = 720;
+  const height = 220;
+  const padding = { top: 24, right: 22, bottom: 36, left: 42 };
+  const yTicks = [100, 75, 50, 25, 0];
+  const xTicks = [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, array) => array.indexOf(value) === index);
+  const path = scaledMetricLinePath(points, width, height, padding, 100);
+  const summary = metricSummary(points);
+
+  return `
+    <div class="performance-chart temperature-chart">
+      <div class="performance-legend">
+        <span><i class="temperature"></i>Temperatura</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de temperatura do servidor">
+        ${yTicks.map((tick) => {
+          const y = padding.top + ((100 - tick) / 100) * (height - padding.top - padding.bottom);
+          return `<g class="chart-grid"><line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}"></line><text x="${padding.left - 10}" y="${(y + 4).toFixed(1)}">${tick}C</text></g>`;
+        }).join("")}
+        ${xTicks.map((index) => {
+          const x = padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * (width - padding.left - padding.right));
+          return `<g class="chart-x"><line x1="${x.toFixed(1)}" y1="${padding.top}" x2="${x.toFixed(1)}" y2="${height - padding.bottom}"></line><text x="${x.toFixed(1)}" y="${height - 12}">${escapeHtml(points[index]?.label || "")}</text></g>`;
+        }).join("")}
+        ${path ? `<path class="chart-line temperature" d="${path}"></path>` : ""}
+      </svg>
+    </div>
+    <div class="performance-stats">
+      <span>Atual <strong>${escapeHtml(`${summary.latest.value.toFixed(1)} C`)}</strong></span>
+      <span>Pico <strong>${escapeHtml(`${summary.peak.value.toFixed(1)} C`)}</strong></span>
+      <span>Amostras <strong>${escapeHtml(String(points.length))}</strong></span>
+    </div>
+  `;
 }
 
 function performanceLineChart(cpuValues, memoryValues, diskValues = [], storage = {}) {
