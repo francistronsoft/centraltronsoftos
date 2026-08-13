@@ -1040,6 +1040,42 @@ function backupPanelLabel(client, backups = {}) {
   return label;
 }
 
+function normalizedBackupDatabaseText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\.(gbk|fbk|gz|zip|manifest|json)$/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function backupDatabaseLabel(file = {}, client = null) {
+  const explicit = file.databaseAlias
+    || file.alias
+    || file.databaseName
+    || file.database
+    || file.dbAlias
+    || file.dbName
+    || file.manifest?.databaseAlias
+    || file.manifest?.databaseName;
+  if (explicit) return String(explicit);
+
+  const databases = monitoredDatabases(client?.databaseInfo || {});
+  if (!databases.length) return "";
+  if (databases.length === 1) return databaseDisplayAlias(databases[0]) || databaseDisplayName(databases[0]);
+
+  const fileText = normalizedBackupDatabaseText(`${file.name || ""} ${file.path || ""}`);
+  const match = databases.find((database) => {
+    const candidates = [
+      database.databaseAlias,
+      database.alias,
+      database.id,
+      database.databaseName,
+      database.name
+    ].map(normalizedBackupDatabaseText).filter((item) => item.length >= 3);
+    return candidates.some((candidate) => fileText.includes(candidate));
+  });
+  return match ? databaseDisplayAlias(match) || databaseDisplayName(match) : "banco nao identificado";
+}
+
 function monitorStatus(client) {
   if (client.status === "offline") return "offline";
   const alert = latestOpenAlertForClient(client.id);
@@ -1717,6 +1753,15 @@ function databaseDisplayAlias(database = {}) {
   return database.databaseAlias || database.alias || database.id || "";
 }
 
+function databaseProblemMessage(database = {}) {
+  const status = String(database.status || database.state || database.healthStatus || "").toLowerCase();
+  const error = database.error || database.lastError || database.connectionError || database.health?.error || "";
+  if (database.ok === false) return error || "banco informado com falha";
+  if (error) return String(error);
+  if (["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) return `status ${status}`;
+  return "";
+}
+
 function renderDatabaseSummary(databaseInfo = {}, client = {}) {
   const databases = monitoredDatabases(databaseInfo);
   if (databases.length <= 1) {
@@ -2314,13 +2359,24 @@ function renderBackupFiles(files = [], client = null) {
   }
   const validateBackups = environmentPlatform(client) !== "windows";
   const manifests = new Set(files.filter(isBackupManifestFile).map(backupFileKey));
-  return files.slice(0, 6).map((file) => `
-    <article class="detail-list-item ${validateBackups && isBackupPayloadFile(file) && !manifests.has(backupFileKey(file)) ? "warning" : ""}">
-      <strong>${escapeHtml(file.name || file.path || "Backup")}</strong>
-      <span>${escapeHtml(file.modifiedAt ? formatRelativeTime(file.modifiedAt) : "-")} ${file.size ? `- ${escapeHtml(bytesLabel(file.size))}` : ""}</span>
-      <small>${escapeHtml(!validateBackups ? "backup informado pelo agente" : isBackupManifestFile(file) ? "manifesto de validacao" : manifests.has(backupFileKey(file)) ? "backup validado" : "aguardando validacao")}</small>
-    </article>
-  `).join("");
+  return files.slice(0, 8).map((file) => {
+    const databaseLabel = backupDatabaseLabel(file, client);
+    const fileName = file.name || file.path || "Backup";
+    const status = !validateBackups
+      ? "backup informado pelo agente"
+      : isBackupManifestFile(file)
+        ? "manifesto de validacao"
+        : manifests.has(backupFileKey(file))
+          ? "backup validado"
+          : "aguardando validacao";
+    return `
+      <article class="detail-list-item ${validateBackups && isBackupPayloadFile(file) && !manifests.has(backupFileKey(file)) ? "warning" : ""}">
+        <strong>${escapeHtml(databaseLabel ? `Banco: ${databaseLabel}` : "Banco nao identificado")}</strong>
+        <span>${escapeHtml(file.modifiedAt ? formatRelativeTime(file.modifiedAt) : "-")} ${file.size ? `- ${escapeHtml(bytesLabel(file.size))}` : ""}</span>
+        <small>${escapeHtml(`${status} | ${fileName}`)}</small>
+      </article>
+    `;
+  }).join("");
 }
 
 function serviceStatusTone(status) {
@@ -2434,15 +2490,40 @@ function renderServiceInventory(services = {}, platform = "") {
 }
 
 function renderClientAlerts(client) {
-  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && isVisibleAlert(alert)).slice(0, 8);
-  if (alerts.length === 0) return `<p class="empty-note">Nenhum alerta recente para este cliente.</p>`;
-  return alerts.map((alert) => `
-    <article class="detail-list-item ${escapeHtml(alert.severity || "info")}">
-      <strong>${escapeHtml(alert.title || alert.code || "Alerta")}</strong>
-      <span>${escapeHtml(severityLabels[alert.severity] || alert.severity)} - ${escapeHtml(alert.status === "resolved" ? "Resolvido" : "Aberto")} - ${escapeHtml(formatRelativeTime(alert.openedAt))}</span>
-      ${alert.message ? `<small>${escapeHtml(alert.message)}</small>` : ""}
-    </article>
-  `).join("");
+  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && isVisibleAlert(alert));
+  const existingDatabaseAlerts = new Set(alerts.map((alert) => String(alert.details?.databaseAlias || alert.details?.databaseName || "").toLowerCase()).filter(Boolean));
+  const derivedDatabaseAlerts = monitoredDatabases(client.databaseInfo).map((database) => {
+    const message = databaseProblemMessage(database);
+    const alias = databaseDisplayAlias(database) || databaseDisplayName(database);
+    if (!message || existingDatabaseAlerts.has(String(alias).toLowerCase())) return null;
+    return {
+      title: "Banco com problema",
+      message,
+      severity: "critical",
+      status: "open",
+      openedAt: database.checkedAt || database.updatedAt || client.updatedAt || client.lastSeenAt,
+      details: {
+        databaseAlias: databaseDisplayAlias(database),
+        databaseName: databaseDisplayName(database)
+      }
+    };
+  }).filter(Boolean);
+  const visibleAlerts = [...derivedDatabaseAlerts, ...alerts].slice(0, 8);
+  if (visibleAlerts.length === 0) return `<p class="empty-note">Nenhum alerta recente para este cliente.</p>`;
+  return visibleAlerts.map((alert) => {
+    const database = alert.details?.databaseAlias
+      || alert.details?.alias
+      || alert.details?.databaseName
+      || alert.details?.name
+      || "";
+    return `
+      <article class="detail-list-item ${escapeHtml(alert.severity || "info")}">
+        <strong>${escapeHtml(database ? `${alert.title || alert.code || "Alerta"} | Banco: ${database}` : alert.title || alert.code || "Alerta")}</strong>
+        <span>${escapeHtml(severityLabels[alert.severity] || alert.severity)} - ${escapeHtml(alert.status === "resolved" ? "Resolvido" : "Aberto")} - ${escapeHtml(formatRelativeTime(alert.openedAt))}</span>
+        ${alert.message ? `<small>${escapeHtml(alert.message)}</small>` : ""}
+      </article>
+    `;
+  }).join("");
 }
 
 function renderClientDetail(client) {

@@ -1518,6 +1518,81 @@ function resolveIndexAlertsIfHealthy(db, installation) {
   });
 }
 
+function databaseProblem(database = {}) {
+  const status = String(database.status || database.state || database.healthStatus || "").toLowerCase();
+  const error = database.error || database.lastError || database.connectionError || database.health?.error || "";
+  if (database.ok === false) return error || "banco informado com falha";
+  if (error) return String(error);
+  if (["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) {
+    return `status ${status}`;
+  }
+  return "";
+}
+
+function databaseAlertCode(database = {}) {
+  const key = databaseIdentity(database) || "sem-alias";
+  return `database.unhealthy.${key.replace(/[^a-z0-9_-]+/g, "_").slice(0, 80)}`;
+}
+
+function databaseAlertTitle(database = {}) {
+  const alias = database.databaseAlias || database.alias || database.id || "";
+  const name = database.databaseName || database.name || "Banco Firebird";
+  return alias && alias !== name ? `Banco ${alias} com problema` : `${name} com problema`;
+}
+
+function syncDatabaseHealthAlerts(db, installation) {
+  const databases = Array.isArray(installation.database?.databases) && installation.database.databases.length
+    ? installation.database.databases
+    : [installation.database].filter(Boolean);
+  const activeCodes = new Set();
+
+  databases.forEach((database) => {
+    const problem = databaseProblem(database);
+    const code = databaseAlertCode(database);
+    if (!problem) return;
+    activeCodes.add(code);
+    const existing = db.alerts.find((alert) => alert.installationId === installation.installationId && alert.status === "open" && alert.code === code);
+    const details = {
+      kind: "database",
+      databaseAlias: database.databaseAlias || database.alias || database.id || "",
+      databaseName: database.databaseName || database.name || "",
+      engine: database.engine || "Firebird"
+    };
+    if (existing) {
+      existing.title = databaseAlertTitle(database);
+      existing.message = problem;
+      existing.severity = "critical";
+      existing.details = details;
+      existing.updatedAt = nowIso();
+      return;
+    }
+    db.alerts.push({
+      id: randomUUID(),
+      installationId: installation.installationId,
+      clientId: installation.clientId,
+      title: databaseAlertTitle(database),
+      message: problem,
+      code,
+      severity: "critical",
+      status: "open",
+      details,
+      openedAt: nowIso(),
+      resolvedAt: null
+    });
+  });
+
+  db.alerts.forEach((alert) => {
+    if (alert.installationId !== installation.installationId || alert.status !== "open") return;
+    if (alert.details?.kind !== "database" && !String(alert.code || "").startsWith("database.unhealthy.")) return;
+    if (activeCodes.has(alert.code)) return;
+    alert.status = "resolved";
+    alert.resolvedAt = nowIso();
+  });
+  if (activeCodes.size > 0) {
+    installation.status = "warning";
+  }
+}
+
 function findInstallationByRequest(db, payload, request) {
   const token = request.headers["x-installation-token"];
   const installationId = payload.installationId;
@@ -2377,6 +2452,7 @@ async function handleHeartbeat(request, response) {
   appendIndexAuditHistory(installation);
   appendDatabasesHistory(installation);
   resolveIndexAlertsIfHealthy(db, installation);
+  syncDatabaseHealthAlerts(db, installation);
   installation.host = normalizedHostPayload(payload, installation);
   installation.cluster = { ...(installation.cluster || {}), ...(payload.cluster || {}) };
   installation.services = normalizeServiceInventory(payload, installation.services || {});
