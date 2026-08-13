@@ -2562,25 +2562,28 @@ function renderClientDetail(client) {
           </div>
           ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
         </article>
-        <article class="ops-panel">
-          <div class="ops-panel-head">
-            <div>
-              <h3>Rede / Internet</h3>
-              <span>trafego, latencia e perda ate fora da loja</span>
-            </div>
-          </div>
-          ${networkLineChart(metrics)}
-        </article>
-        <article class="ops-panel">
-          <div class="ops-panel-head">
-            <div>
-              <h3>Rede local</h3>
-              <span>gateway, DNS, link e erros da interface</span>
-            </div>
-          </div>
-          ${localNetworkLineChart(metrics)}
-        </article>
       </div>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Rede / Internet</h3>
+            <span>trafego, latencia e perda ate fora da loja</span>
+          </div>
+        </div>
+        ${networkLineChart(metrics)}
+      </article>
+      <article class="ops-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Rede local</h3>
+            <span>gateway, DNS, link e erros da interface</span>
+          </div>
+        </div>
+        ${localNetworkLineChart(metrics)}
+      </article>
     </section>
 
     <section class="ops-grid">
