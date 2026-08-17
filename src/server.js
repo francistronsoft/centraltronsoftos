@@ -979,7 +979,29 @@ function normalizeBackups(backups = {}) {
       .sort((a, b) => backupPayloadTimestamp(b) - backupPayloadTimestamp(a))
       .slice(0, 40);
   }
+  const rawBackupTimes = [
+    next.latestFile,
+    next.receiver?.latestBackup,
+    ...(Array.isArray(next.recentFiles) ? next.recentFiles : [])
+  ]
+    .filter(isBackupPayloadFile)
+    .map(backupPayloadTimestamp)
+    .filter(Boolean);
+  const latestReceivedBackupAt = rawBackupTimes.length ? Math.max(...rawBackupTimes) : 0;
+  if (latestReceivedBackupAt) {
+    const latestReceivedIso = new Date(latestReceivedBackupAt).toISOString();
+    next.latestReceivedBackupAt = latestReceivedIso;
+    next.latestBackupFileAt = next.latestBackupFileAt || latestReceivedIso;
+    const currentLatestBackupAt = parseBackupPayloadTimestamp(next.latestBackupAt);
+    if (!currentLatestBackupAt || latestReceivedBackupAt > currentLatestBackupAt) {
+      next.latestBackupAt = latestReceivedIso;
+    }
+  }
   return next;
+}
+
+function isBackupPayloadFile(file = {}) {
+  return /\.(gbk|fbk|gbk\.gz|fbk\.gz)$/i.test(file?.name || file?.path || "");
 }
 
 function backupPayloadTimestamp(file = {}) {
