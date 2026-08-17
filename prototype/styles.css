@@ -1434,6 +1434,12 @@ tr.clickable-row:hover,
   background: #344756;
 }
 
+.ops-chip.version-chip {
+  color: #29445f;
+  background: #edf4fb;
+  border: 1px solid #d4e4f2;
+}
+
 .ops-metrics,
 .ops-grid,
 .detail-grid {

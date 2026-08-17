@@ -2691,7 +2691,7 @@ function renderClientDetail(client) {
             <h3>Saude do ambiente</h3>
             <span>${escapeHtml(host.hostname || "hostname nao informado")} - ${escapeHtml(host.ip || "ip nao informado")}</span>
           </div>
-          <span class="ops-chip ${escapeHtml(statusTone)}">${escapeHtml(client.version)}</span>
+          <span class="ops-chip version-chip">${escapeHtml(client.version)}</span>
         </div>
         <div class="gauge-grid">
           ${detailGauge("Disco servidor", disk, diskTone, "uso geral informado")}
