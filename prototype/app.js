@@ -1790,6 +1790,17 @@ function detailMetric(title, value, tone = "neutral", caption = "") {
   `;
 }
 
+function serverTimeLabel(host = {}) {
+  return host.serverTime || host.time || host.now || host.collectedAt || "";
+}
+
+function serverTimeCaption(host = {}) {
+  const time = serverTimeLabel(host);
+  if (!time) return "hora do servidor nao informada";
+  const timezone = host.timezone || host.tz || "";
+  return `${formatDateTime(time)}${timezone ? ` | ${timezone}` : ""}`;
+}
+
 function indexAuditDetail(database = {}) {
   const audit = database.indexAudit;
   if (!audit) return "-";
@@ -2548,7 +2559,7 @@ function renderServiceInventory(services = {}, platform = "") {
 }
 
 function renderClientAlerts(client) {
-  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && isVisibleAlert(alert));
+  const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && alert.status !== "resolved" && isVisibleAlert(alert));
   const existingDatabaseAlerts = new Set(alerts.map((alert) => String(alert.details?.databaseAlias || alert.details?.databaseName || "").toLowerCase()).filter(Boolean));
   const derivedDatabaseAlerts = monitoredDatabases(client.databaseInfo).map((database) => {
     const message = databaseProblemMessage(database);
@@ -2633,6 +2644,7 @@ function renderClientDetail(client) {
 
     <section class="ops-metrics">
       ${detailMetric("Heartbeat", heartbeatAge, statusTone, client.lastSeen)}
+      ${detailMetric("Hora servidor", serverTimeLabel(host) ? formatDateTime(serverTimeLabel(host)) : "-", "neutral", host.timezone || "timezone nao informado")}
       ${detailMetric("Alertas abertos", openAlerts, openAlerts > 0 ? "warning" : "online", "eventos ativos")}
       ${detailMetric("Banco", client.database, "neutral", "versao_banco")}
       ${detailMetric("Backup", client.backup.label, client.backup.tone, client.backup.detail)}
@@ -2662,6 +2674,7 @@ function renderClientDetail(client) {
           <div class="detail-grid compact">
             ${detailItem("Hostname", host.hostname)}
             ${detailItem("IP", host.ip)}
+            ${detailItem("Hora servidor", serverTimeCaption(host))}
             ${detailItem("Sistema", host.os)}
             ${detailItem("CPU", cpuModel)}
             ${detailItem("Nucleos", cpuCores)}
