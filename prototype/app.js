@@ -206,6 +206,17 @@ function backupAgeLabel(minutes) {
   return `ha ${hours} h ${rest} min`;
 }
 
+function durationLabelFromMs(ms) {
+  const totalSeconds = Math.max(0, Math.round(Math.abs(Number(ms) || 0) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} s`;
+  const minutes = Math.round(totalSeconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (rest === 0) return `${hours} h`;
+  return `${hours} h ${rest} min`;
+}
+
 function compactText(value, max = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
@@ -1801,6 +1812,28 @@ function serverTimeCaption(host = {}) {
   return `${formatDateTime(time)}${timezone ? ` | ${timezone}` : ""}`;
 }
 
+function serverTimeStatus(host = {}, centralReceivedAt = "") {
+  const time = serverTimeLabel(host);
+  const serverMs = time ? new Date(time).getTime() : 0;
+  const centralMs = centralReceivedAt ? new Date(centralReceivedAt).getTime() : Date.now();
+  if (!Number.isFinite(serverMs) || !serverMs) {
+    return { tone: "unknown", label: "-", caption: "hora do servidor nao informada" };
+  }
+  if (!Number.isFinite(centralMs) || !centralMs) {
+    return { tone: "unknown", label: formatDateTime(time), caption: "sem referencia da Central" };
+  }
+  const driftMs = serverMs - centralMs;
+  const absDriftMs = Math.abs(driftMs);
+  const direction = driftMs > 0 ? "adiantado" : "atrasado";
+  if (absDriftMs <= 5 * 60 * 1000) {
+    return { tone: "online", label: "Hora OK", caption: `${formatDateTime(time)} | diferenca ${durationLabelFromMs(absDriftMs)}` };
+  }
+  if (absDriftMs <= 15 * 60 * 1000) {
+    return { tone: "warning", label: "Hora divergente", caption: `${direction} ${durationLabelFromMs(absDriftMs)} | ${formatDateTime(time)}` };
+  }
+  return { tone: "offline", label: "Hora incorreta", caption: `${direction} ${durationLabelFromMs(absDriftMs)} | ${formatDateTime(time)}` };
+}
+
 function indexAuditDetail(database = {}) {
   const audit = database.indexAudit;
   if (!audit) return "-";
@@ -2626,6 +2659,7 @@ function renderClientDetail(client) {
   const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
   const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
   const storage = storageInfo(client);
+  const serverClock = serverTimeStatus(host, client.lastSeenAt);
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
@@ -2644,7 +2678,7 @@ function renderClientDetail(client) {
 
     <section class="ops-metrics">
       ${detailMetric("Heartbeat", heartbeatAge, statusTone, client.lastSeen)}
-      ${detailMetric("Hora servidor", serverTimeLabel(host) ? formatDateTime(serverTimeLabel(host)) : "-", "neutral", host.timezone || "timezone nao informado")}
+      ${detailMetric("Hora servidor", serverClock.label, serverClock.tone, serverClock.caption)}
       ${detailMetric("Alertas abertos", openAlerts, openAlerts > 0 ? "warning" : "online", "eventos ativos")}
       ${detailMetric("Banco", client.database, "neutral", "versao_banco")}
       ${detailMetric("Backup", client.backup.label, client.backup.tone, client.backup.detail)}
