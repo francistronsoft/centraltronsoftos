@@ -1034,6 +1034,21 @@ function latestBackupTimestamp(backups = {}) {
 
 function backupSummary(installation) {
   const backups = installation?.backups || {};
+  const latestRaw = latestRawBackupFile(backups);
+  const rawTime = backupFileTimestamp(latestRaw);
+  const validatedTime = latestValidatedBackupTime(backups);
+  if (rawTime && (!validatedTime || rawTime > validatedTime + 60_000)) {
+    const rawIso = new Date(rawTime).toISOString();
+    const minutes = Math.max(0, Math.round((Date.now() - rawTime) / 60000));
+    if (Number.isFinite(minutes) && minutes <= 360) {
+      const validationDetail = validatedTime
+        ? `aguardando validacao; ultimo validado ${formatDateTime(new Date(validatedTime).toISOString())}`
+        : "aguardando validacao";
+      return { label: `Backup recebido ${backupAgeLabel(minutes)}`, tone: "warning", detail: validationDetail };
+    }
+    return { label: `Arquivo aguardando validacao ${backupAgeLabel(minutes)}`, tone: "warning", detail: formatDateTime(rawIso) };
+  }
+
   const latest = latestBackupTimestamp(backups);
   if (!latest) {
     return { label: "--", tone: "unknown", detail: "sem dados" };
