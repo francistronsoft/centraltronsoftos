@@ -973,7 +973,28 @@ function normalizeBackups(backups = {}) {
   if (next.quota && typeof next.quota === "object") {
     next.quota = normalizeQuota(next.quota);
   }
+  if (Array.isArray(next.recentFiles)) {
+    next.recentFiles = next.recentFiles
+      .filter((file) => file && typeof file === "object")
+      .sort((a, b) => backupPayloadTimestamp(b) - backupPayloadTimestamp(a))
+      .slice(0, 40);
+  }
   return next;
+}
+
+function backupPayloadTimestamp(file = {}) {
+  return parseBackupPayloadTimestamp(file.modifiedAt)
+    || parseBackupPayloadTimestamp(file.backupFinishedAt)
+    || parseBackupPayloadTimestamp(file.uploadedAt)
+    || parseBackupPayloadTimestamp(file.createdAt)
+    || parseBackupPayloadTimestamp(file.manifest?.backupFinishedAt)
+    || parseBackupPayloadTimestamp(file.manifest?.modifiedAt)
+    || 0;
+}
+
+function parseBackupPayloadTimestamp(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
 }
 
 function normalizeServiceInventory(payload = {}, previous = {}) {

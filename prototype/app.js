@@ -980,15 +980,50 @@ function temperatureSeriesValues(metrics = {}) {
   ]).filter((point) => point.value > 0 && point.value < 130);
 }
 
+function parseBackupTimestamp(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function collectBackupTimestamps(value, output = [], depth = 0) {
+  if (!value || depth > 4) return output;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectBackupTimestamps(item, output, depth + 1));
+    return output;
+  }
+  if (typeof value !== "object") return output;
+
+  [
+    "latestValidatedBackupAt",
+    "latestBackupAt",
+    "latestUploadedAt",
+    "modifiedAt",
+    "backupFinishedAt",
+    "uploadedAt",
+    "finishedAt",
+    "completedAt",
+    "validatedAt"
+  ].forEach((key) => {
+    const time = parseBackupTimestamp(value[key]);
+    if (time) output.push(time);
+  });
+
+  Object.entries(value).forEach(([key, item]) => {
+    if (["quota", "backupDir", "errors", "error", "message"].includes(key)) return;
+    if (item && typeof item === "object") collectBackupTimestamps(item, output, depth + 1);
+  });
+  return output;
+}
+
+function latestBackupTimestamp(backups = {}) {
+  const timestamps = collectBackupTimestamps(backups);
+  if (!timestamps.length) return null;
+  return new Date(Math.max(...timestamps)).toISOString();
+}
+
 function backupSummary(installation) {
   const backups = installation?.backups || {};
-  const latest = backups.latestValidatedBackupAt
-    || backups.latestBackupAt
-    || backups.latestUploadedAt
-    || backups.latestFile?.modifiedAt
-    || backups.recentFiles?.[0]?.modifiedAt
-    || backups.receiver?.latestBackup?.modifiedAt
-    || null;
+  const latest = latestBackupTimestamp(backups);
   if (!latest) {
     return { label: "--", tone: "unknown", detail: "sem dados" };
   }
@@ -1000,8 +1035,12 @@ function backupSummary(installation) {
 }
 
 function backupFileTimestamp(file) {
-  const time = file?.modifiedAt ? new Date(file.modifiedAt).getTime() : 0;
-  return Number.isFinite(time) ? time : 0;
+  return parseBackupTimestamp(file?.modifiedAt)
+    || parseBackupTimestamp(file?.backupFinishedAt)
+    || parseBackupTimestamp(file?.uploadedAt)
+    || parseBackupTimestamp(file?.createdAt)
+    || parseBackupTimestamp(file?.manifest?.backupFinishedAt)
+    || parseBackupTimestamp(file?.manifest?.modifiedAt);
 }
 
 function isBackupPayloadFile(file) {
@@ -1018,10 +1057,32 @@ function backupFileKey(file) {
 
 function latestRawBackupFile(backups = {}) {
   const files = Array.isArray(backups.recentFiles) ? backups.recentFiles : [];
-  const latest = backups.latestFile && isBackupPayloadFile(backups.latestFile)
-    ? backups.latestFile
-    : files.filter(isBackupPayloadFile).sort((a, b) => backupFileTimestamp(b) - backupFileTimestamp(a))[0];
+  const candidates = [
+    backups.latestFile,
+    backups.receiver?.latestBackup,
+    ...files
+  ].filter(isBackupPayloadFile);
+  const latest = candidates.sort((a, b) => backupFileTimestamp(b) - backupFileTimestamp(a))[0];
   return latest || null;
+}
+
+function latestValidatedBackupTime(backups = {}) {
+  const files = Array.isArray(backups.recentFiles) ? backups.recentFiles : [];
+  const candidates = [
+    backups.latestValidatedBackupAt,
+    backups.latestManifest?.backupFinishedAt,
+    backups.latestManifest?.modifiedAt,
+    ...files
+      .filter((file) => isBackupManifestFile(file) || file?.manifest?.validationOk === true)
+      .flatMap((file) => [
+        file.modifiedAt,
+        file.backupFinishedAt,
+        file.manifest?.backupFinishedAt,
+        file.manifest?.modifiedAt,
+        file.manifest?.validatedAt
+      ])
+  ].map(parseBackupTimestamp).filter(Boolean);
+  return candidates.length ? Math.max(...candidates) : 0;
 }
 
 function backupPanelLabel(client, backups = {}) {
@@ -1029,13 +1090,9 @@ function backupPanelLabel(client, backups = {}) {
   if (environmentPlatform(client) === "windows") return label;
   const latestRaw = latestRawBackupFile(backups);
   const rawTime = backupFileTimestamp(latestRaw);
-  const validatedTime = backups.latestValidatedBackupAt
-    ? new Date(backups.latestValidatedBackupAt).getTime()
-    : backups.latestManifest?.validationOk && backups.latestManifest?.backupFinishedAt
-      ? new Date(backups.latestManifest.backupFinishedAt).getTime()
-      : 0;
+  const validatedTime = latestValidatedBackupTime(backups);
   if (rawTime && (!validatedTime || rawTime > validatedTime + 60_000)) {
-    return `${label} | arquivo recente sem validacao ${formatRelativeTime(latestRaw.modifiedAt)}`;
+    return `${label} | arquivo recente sem validacao ${formatRelativeTime(new Date(rawTime).toISOString())}`;
   }
   return label;
 }
@@ -2358,8 +2415,9 @@ function renderBackupFiles(files = [], client = null) {
     return `<p class="empty-note">Nenhum arquivo de backup recente informado.</p>`;
   }
   const validateBackups = environmentPlatform(client) !== "windows";
-  const manifests = new Set(files.filter(isBackupManifestFile).map(backupFileKey));
-  return files.slice(0, 8).map((file) => {
+  const orderedFiles = [...files].sort((a, b) => backupFileTimestamp(b) - backupFileTimestamp(a));
+  const manifests = new Set(orderedFiles.filter(isBackupManifestFile).map(backupFileKey));
+  return orderedFiles.slice(0, 8).map((file) => {
     const databaseLabel = backupDatabaseLabel(file, client);
     const fileName = file.name || file.path || "Backup";
     const status = !validateBackups
