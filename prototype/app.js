@@ -2034,6 +2034,30 @@ function miniBars(seed, tone = "online") {
   return `<div class="mini-bars ${escapeHtml(tone)}">${bars}</div>`;
 }
 
+function metricBars(values = [], tone = "online") {
+  if (!Array.isArray(values) || values.length === 0) return `<div class="metric-empty">sem serie historica</div>`;
+  const points = values
+    .map((point) => typeof point === "number" ? { value: point, label: "sem horario" } : point)
+    .map((point) => ({ value: Number(point.value), label: point.label || "sem horario" }))
+    .filter((point) => Number.isFinite(point.value));
+  if (!points.length) return `<div class="metric-empty">sem serie historica</div>`;
+
+  const max = Math.max(100, ...points.map((point) => point.value));
+  const peak = points.reduce((highest, point) => point.value > highest.value ? point : highest, points[0]);
+  const latest = points[points.length - 1];
+  const bars = points.map((point) => {
+    const height = Math.max(8, Math.min(96, Math.round((point.value / max) * 96)));
+    return `<span title="${escapeHtml(point.label)} - ${escapeHtml(point.value.toFixed(1))}%" style="height:${height}%"></span>`;
+  }).join("");
+  return `
+    <div class="mini-bars ${escapeHtml(tone)}">${bars}</div>
+    <div class="metric-chart-caption">
+      <span>Pico ${escapeHtml(peak.value.toFixed(1))}% em ${escapeHtml(peak.label)}</span>
+      <span>Ultima ${escapeHtml(latest.value.toFixed(1))}% em ${escapeHtml(latest.label)}</span>
+    </div>
+  `;
+}
+
 function weekKey(date) {
   const copy = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = copy.getUTCDay() || 7;
