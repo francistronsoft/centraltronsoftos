@@ -421,6 +421,7 @@ function effectiveInstallationStatus(installation = {}) {
 }
 
 function normalizeSeverity(severity) {
+  severity = String(severity || "").toLowerCase();
   const allowed = new Set(["info", "warning", "critical"]);
   return allowed.has(severity) ? severity : "info";
 }
@@ -1663,6 +1664,71 @@ function addEvent(db, type, installation, payload) {
   return event;
 }
 
+function heartbeatAlertCode(alert = {}) {
+  const explicit = String(alert.code || alert.type || "").trim();
+  if (explicit) return explicit;
+  const fallback = toSlug(`${alert.title || ""} ${alert.message || ""}`) || "tronsoftos-alert";
+  return fallback.toUpperCase().slice(0, 96);
+}
+
+function upsertHeartbeatAlerts(db, installation, alerts = []) {
+  if (!Array.isArray(alerts)) return;
+  const normalizedAlerts = alerts
+    .map((alert) => ({
+      code: heartbeatAlertCode(alert),
+      title: String(alert.title || alert.code || alert.type || "Alerta TronSoftOS").trim(),
+      message: String(alert.message || "").trim(),
+      severity: normalizeSeverity(alert.severity || "info"),
+      source: alert.source || "TronSoftOS",
+      details: alert.details || {}
+    }))
+    .filter((alert) => alert.code || alert.title || alert.message);
+  const activeCodes = new Set(normalizedAlerts.map((alert) => alert.code).filter(Boolean));
+
+  db.alerts.forEach((alert) => {
+    if (alert.installationId !== installation.installationId || alert.status !== "open") return;
+    if (alert.code && activeCodes.has(alert.code)) return;
+    alert.status = "resolved";
+    alert.resolvedAt = nowIso();
+    alert.updatedAt = nowIso();
+  });
+
+  normalizedAlerts.forEach((incoming) => {
+    const existing = db.alerts.find((alert) => {
+      return alert.installationId === installation.installationId
+        && alert.status === "open"
+        && alert.code === incoming.code;
+    });
+    if (existing) {
+      existing.title = incoming.title || existing.title;
+      existing.message = incoming.message || existing.message;
+      existing.severity = incoming.severity;
+      existing.source = incoming.source;
+      existing.details = incoming.details;
+      existing.updatedAt = nowIso();
+    } else {
+      db.alerts.push({
+        id: randomUUID(),
+        installationId: installation.installationId,
+        clientId: installation.clientId,
+        title: incoming.title,
+        message: incoming.message,
+        code: incoming.code,
+        severity: incoming.severity,
+        status: "open",
+        source: incoming.source,
+        details: incoming.details,
+        openedAt: nowIso(),
+        updatedAt: nowIso(),
+        resolvedAt: null
+      });
+    }
+    if (incoming.severity === "critical" || incoming.severity === "warning") {
+      installation.status = "warning";
+    }
+  });
+}
+
 function publicPairingToken(token) {
   return {
     id: token.id,
@@ -2504,15 +2570,7 @@ async function handleHeartbeat(request, response) {
   installation.lastSeenAt = nowIso();
   installation.updatedAt = nowIso();
 
-  if (Array.isArray(payload.alerts)) {
-    const activeCodes = new Set(payload.alerts.map((alert) => alert.code).filter(Boolean));
-    db.alerts.forEach((alert) => {
-      if (alert.installationId !== installation.installationId || alert.status !== "open") return;
-      if (alert.code && activeCodes.has(alert.code)) return;
-      alert.status = "resolved";
-      alert.resolvedAt = nowIso();
-    });
-  }
+  upsertHeartbeatAlerts(db, installation, payload.alerts);
 
   addEvent(db, "heartbeat", installation, payload);
   await writeDb(db);

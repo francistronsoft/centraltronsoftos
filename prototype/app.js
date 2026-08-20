@@ -2469,6 +2469,63 @@ function localNetworkLineChart(metrics = {}) {
   `;
 }
 
+function metricPercentLabel(value) {
+  if (value === null || value === undefined || value === "") return "--";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toFixed(1)}%`;
+}
+
+function firebirdMetrics(metrics = {}) {
+  const firebird = metrics.firebird || {};
+  const latest = firebird.latest || {};
+  const series = Array.isArray(firebird.series) ? firebird.series : [];
+  const lastSeries = series.at(-1) || {};
+  const cpuPercent = Number(latest.cpuPercent ?? lastSeries.cpuPercent);
+  const memoryPercent = Number(latest.memoryPercent ?? lastSeries.memoryPercent);
+  const memoryUsageBytes = latest.memoryUsageBytes ?? lastSeries.memoryUsageBytes;
+  const memoryLimitBytes = latest.memoryLimitBytes ?? lastSeries.memoryLimitBytes;
+  const target = latest.target || lastSeries.target || "firebird";
+  return {
+    target,
+    cpuPercent: Number.isFinite(cpuPercent) ? cpuPercent : null,
+    memoryPercent: Number.isFinite(memoryPercent) ? memoryPercent : null,
+    memoryUsageBytes,
+    memoryLimitBytes,
+    uptimeSeconds: firebird.uptimeSeconds ?? null,
+    cpuSeries: series.map((item) => Number(item.cpuPercent)).filter(Number.isFinite).slice(-18),
+    memorySeries: series.map((item) => Number(item.memoryPercent)).filter(Number.isFinite).slice(-18)
+  };
+}
+
+function firebirdMetricsPanel(metrics = {}) {
+  const firebird = firebirdMetrics(metrics);
+  const memoryCaption = firebird.memoryUsageBytes || firebird.memoryLimitBytes
+    ? `${bytesLabel(firebird.memoryUsageBytes)} de ${bytesLabel(firebird.memoryLimitBytes)}`
+    : "memoria do processo Firebird";
+  const uptimeCaption = Number.isFinite(Number(firebird.uptimeSeconds))
+    ? `uptime ${Math.round(Number(firebird.uptimeSeconds) / 3600)} h`
+    : "uptime nao informado";
+  return `
+    <article class="ops-panel ops-panel-wide">
+      <div class="ops-panel-head">
+        <div>
+          <h3>Firebird CPU / Memoria</h3>
+          <span>${escapeHtml(firebird.target)} - ${escapeHtml(uptimeCaption)}</span>
+        </div>
+      </div>
+      <section class="ops-metrics compact-metrics">
+        ${detailMetric("CPU Firebird", metricPercentLabel(firebird.cpuPercent), firebird.cpuPercent >= 85 ? "warning" : "online", "processo Firebird")}
+        ${detailMetric("Memoria Firebird", metricPercentLabel(firebird.memoryPercent), firebird.memoryPercent >= 90 ? "offline" : firebird.memoryPercent >= 80 ? "warning" : "online", memoryCaption)}
+      </section>
+      <div class="metric-chart-label">Historico CPU</div>
+      ${metricBars(firebird.cpuSeries, "warning")}
+      <div class="metric-chart-label">Historico memoria</div>
+      ${metricBars(firebird.memorySeries, "online")}
+    </article>
+  `;
+}
+
 function renderBackupFiles(files = [], client = null) {
   if (!Array.isArray(files) || files.length === 0) {
     return `<p class="empty-note">Nenhum arquivo de backup recente informado.</p>`;
@@ -2808,6 +2865,8 @@ function renderClientDetail(client) {
         </div>
         ${renderDatabasesIndexAuditHistory(database)}
       </article>
+
+      ${firebirdMetricsPanel(metrics)}
     </section>
 
     <section class="ops-grid">
