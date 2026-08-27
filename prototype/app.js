@@ -1861,6 +1861,82 @@ function indexAuditDetail(database = {}) {
   return `${inactive} inativo(s)${delta > 0 ? `, +${delta} novo(s)` : ""}${checkedAt ? ` em ${checkedAt}` : ""}`;
 }
 
+function integerLabel(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString("pt-BR") : "-";
+}
+
+function transactionHealthForDatabase(database = {}) {
+  const health = database.transactionHealth
+    || database.indexHealth?.transactionHealth
+    || database.indexAudit?.transactionHealth
+    || {};
+  return {
+    oldestTransaction: health.oldestTransaction ?? database.oldestTransaction ?? database.indexHealth?.oldestTransaction ?? database.indexAudit?.oldestTransaction ?? null,
+    oldestActive: health.oldestActive ?? database.oldestActive ?? database.indexHealth?.oldestActive ?? database.indexAudit?.oldestActive ?? null,
+    oldestSnapshot: health.oldestSnapshot ?? database.oldestSnapshot ?? database.indexHealth?.oldestSnapshot ?? database.indexAudit?.oldestSnapshot ?? null,
+    nextTransaction: health.nextTransaction ?? database.nextTransaction ?? database.indexHealth?.nextTransaction ?? database.indexAudit?.nextTransaction ?? null,
+    sweepInterval: health.sweepInterval ?? database.sweepInterval ?? database.indexHealth?.sweepInterval ?? database.indexAudit?.sweepInterval ?? null
+  };
+}
+
+function transactionGapInfo(database = {}) {
+  const health = transactionHealthForDatabase(database);
+  const gapFromPayload = database.transactionGap?.gap ?? database.indexHealth?.transactionGap?.gap ?? database.gap ?? null;
+  const oldest = Number(health.oldestTransaction);
+  const next = Number(health.nextTransaction);
+  const gap = Number.isFinite(Number(gapFromPayload))
+    ? Number(gapFromPayload)
+    : Number.isFinite(oldest) && Number.isFinite(next)
+      ? Math.max(0, next - oldest)
+      : null;
+  const critical = Number(database.transactionGap?.criticalThreshold ?? database.indexHealth?.transactionGap?.criticalThreshold ?? 1000000);
+  const warning = Number(database.transactionGap?.warningThreshold ?? database.indexHealth?.transactionGap?.warningThreshold ?? 500000);
+  const tone = !Number.isFinite(Number(gap))
+    ? "unknown"
+    : gap >= critical
+      ? "offline"
+      : gap >= warning
+        ? "warning"
+        : "online";
+  return { ...health, gap, warningThreshold: warning, criticalThreshold: critical, tone };
+}
+
+function transactionStatusLabel(info = {}) {
+  if (!Number.isFinite(Number(info.gap))) return "Sem leitura";
+  if (info.tone === "offline") return "Critico";
+  if (info.tone === "warning") return "Atencao";
+  return "OK";
+}
+
+function renderDatabaseTransactionHealth(databaseInfo = {}) {
+  const databases = monitoredDatabases(databaseInfo);
+  if (!databases.length) {
+    return `<p class="empty-note">Nenhuma leitura transacional recebida ainda.</p>`;
+  }
+  return `
+    <div class="transaction-health-list">
+      ${databases.map((database) => {
+        const info = transactionGapInfo(database);
+        const checkedAt = database.indexHealth?.checkedAt || database.indexAudit?.checkedAt || database.checkedAt || "";
+        return `
+          <article class="transaction-health-row ${escapeHtml(info.tone)}">
+            <div class="transaction-health-title">
+              <strong>${escapeHtml(databaseDisplayName(database))}</strong>
+              <span>${escapeHtml(databaseDisplayAlias(database) || "alias nao informado")}</span>
+            </div>
+            <div><span>Status</span><strong>${escapeHtml(transactionStatusLabel(info))}</strong><small>${escapeHtml(checkedAt ? formatDateTime(checkedAt) : "")}</small></div>
+            <div><span>Gap OIT/Next</span><strong>${escapeHtml(integerLabel(info.gap))}</strong><small>${escapeHtml(`aviso ${integerLabel(info.warningThreshold)} / critico ${integerLabel(info.criticalThreshold)}`)}</small></div>
+            <div><span>Oldest transaction</span><strong>${escapeHtml(integerLabel(info.oldestTransaction))}</strong><small>OIT</small></div>
+            <div><span>Oldest active</span><strong>${escapeHtml(integerLabel(info.oldestActive))}</strong><small>OAT</small></div>
+            <div><span>Next transaction</span><strong>${escapeHtml(integerLabel(info.nextTransaction))}</strong><small>${escapeHtml(`Sweep ${integerLabel(info.sweepInterval)}`)}</small></div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function databaseDisplayName(database = {}) {
   return database.databaseName || database.name || database.databaseAlias || database.alias || "Banco Firebird";
 }
@@ -1875,7 +1951,24 @@ function databaseProblemMessage(database = {}) {
   if (database.ok === false) return error || "banco informado com falha";
   if (error) return String(error);
   if (["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) return `status ${status}`;
+  const transaction = transactionGapInfo(database);
+  if (Number.isFinite(Number(transaction.gap)) && transaction.tone === "offline") {
+    return `gap transacional Firebird critico: ${integerLabel(transaction.gap)}`;
+  }
+  if (Number.isFinite(Number(transaction.gap)) && transaction.tone === "warning") {
+    return `gap transacional Firebird em atencao: ${integerLabel(transaction.gap)}`;
+  }
   return "";
+}
+
+function databaseProblemSeverity(database = {}) {
+  const status = String(database.status || database.state || database.healthStatus || "").toLowerCase();
+  const error = database.error || database.lastError || database.connectionError || database.health?.error || "";
+  if (database.ok === false || error || ["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) {
+    return "critical";
+  }
+  const transaction = transactionGapInfo(database);
+  return transaction.tone === "offline" ? "critical" : "warning";
 }
 
 function renderDatabaseSummary(databaseInfo = {}, client = {}) {
@@ -2517,9 +2610,73 @@ function firebirdMetrics(metrics = {}) {
     memoryUsageBytes,
     memoryLimitBytes,
     uptimeSeconds: firebird.uptimeSeconds ?? null,
-    cpuSeries: series.map((item) => Number(item.cpuPercent)).filter(Number.isFinite).slice(-18),
-    memorySeries: series.map((item) => Number(item.memoryPercent)).filter(Number.isFinite).slice(-18)
+    cpuSeries: metricPointsFromRows(series, ["cpuPercent", "cpu", "cpu_percent"]).slice(-48),
+    memorySeries: metricPointsFromRows(series, ["memoryPercent", "memPercent", "memory", "memory_percent"]).slice(-48)
   };
+}
+
+function metricPointsFromRows(rows = [], keys = []) {
+  return rows.map((row) => {
+    const value = keys.map((key) => Number(row[key])).find(Number.isFinite);
+    const dateValue = row.createdAt || row.collectedAt || row.timestamp || row.time || row.readAt;
+    const date = dateValue ? new Date(dateValue) : null;
+    const label = date && Number.isFinite(date.getTime())
+      ? date.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "sem horario";
+    return { value, label };
+  }).filter((point) => Number.isFinite(point.value));
+}
+
+function firebirdPerformanceLineChart(cpuPoints = [], memoryPoints = []) {
+  if (!cpuPoints.length && !memoryPoints.length) {
+    return `<div class="metric-empty performance-empty">sem serie historica de CPU/memoria do Firebird</div>`;
+  }
+  const points = [cpuPoints, memoryPoints].sort((a, b) => b.length - a.length)[0] || [];
+  const width = 720;
+  const height = 230;
+  const padding = { top: 24, right: 22, bottom: 36, left: 42 };
+  const yTicks = [100, 75, 50, 25, 0];
+  const xTicks = points.length
+    ? [0, Math.floor((points.length - 1) / 2), points.length - 1].filter((value, index, array) => array.indexOf(value) === index)
+    : [];
+  const cpuPath = metricLinePath(cpuPoints, width, height, padding);
+  const memoryPath = metricLinePath(memoryPoints, width, height, padding);
+  const memoryArea = metricAreaPath(memoryPoints, width, height, padding);
+  const cpu = cpuPoints.length ? metricSummary(cpuPoints) : null;
+  const memory = memoryPoints.length ? metricSummary(memoryPoints) : null;
+  return `
+    <div class="performance-chart firebird-performance-chart">
+      <div class="performance-legend">
+        <span><i class="cpu"></i>CPU Firebird</span>
+        <span><i class="memory"></i>Memoria Firebird</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Historico de CPU e memoria do Firebird">
+        <defs>
+          <linearGradient id="firebird-memory-area-gradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#39c87a" stop-opacity="0.24" />
+            <stop offset="100%" stop-color="#39c87a" stop-opacity="0.03" />
+          </linearGradient>
+        </defs>
+        ${yTicks.map((tick) => {
+          const y = padding.top + ((100 - tick) / 100) * (height - padding.top - padding.bottom);
+          return `<g class="chart-grid"><line x1="${padding.left}" y1="${y.toFixed(1)}" x2="${width - padding.right}" y2="${y.toFixed(1)}"></line><text x="${padding.left - 10}" y="${(y + 4).toFixed(1)}">${tick}%</text></g>`;
+        }).join("")}
+        ${xTicks.map((index) => {
+          const x = padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * (width - padding.left - padding.right));
+          return `<g class="chart-x"><line x1="${x.toFixed(1)}" y1="${padding.top}" x2="${x.toFixed(1)}" y2="${height - padding.bottom}"></line><text x="${x.toFixed(1)}" y="${height - 12}">${escapeHtml(points[index]?.label || "")}</text></g>`;
+        }).join("")}
+        ${memoryArea ? `<path class="chart-area firebird-memory" d="${memoryArea}"></path>` : ""}
+        ${memoryPath ? `<path class="chart-line memory" d="${memoryPath}"></path>` : ""}
+        ${cpuPath ? `<path class="chart-line cpu" d="${cpuPath}"></path>` : ""}
+      </svg>
+    </div>
+    <div class="performance-stats">
+      <span>CPU atual <strong>${escapeHtml(cpu ? `${cpu.latest.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Pico CPU <strong>${escapeHtml(cpu ? `${cpu.peak.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Memoria atual <strong>${escapeHtml(memory ? `${memory.latest.value.toFixed(1)}%` : "-")}</strong></span>
+      <span>Pico memoria <strong>${escapeHtml(memory ? `${memory.peak.value.toFixed(1)}%` : "-")}</strong></span>
+    </div>
+  `;
 }
 
 function firebirdMetricsPanel(metrics = {}) {
@@ -2542,10 +2699,7 @@ function firebirdMetricsPanel(metrics = {}) {
         ${detailMetric("CPU Firebird", metricPercentLabel(firebird.cpuPercent), firebird.cpuPercent >= 85 ? "warning" : "online", "processo Firebird")}
         ${detailMetric("Memoria Firebird", metricPercentLabel(firebird.memoryPercent), firebird.memoryPercent >= 90 ? "offline" : firebird.memoryPercent >= 80 ? "warning" : "online", memoryCaption)}
       </section>
-      <div class="metric-chart-label">Historico CPU</div>
-      ${metricBars(firebird.cpuSeries, "warning")}
-      <div class="metric-chart-label">Historico memoria</div>
-      ${metricBars(firebird.memorySeries, "online")}
+      ${firebirdPerformanceLineChart(firebird.cpuSeries, firebird.memorySeries)}
     </article>
   `;
 }
@@ -2697,7 +2851,7 @@ function renderClientAlerts(client) {
     return {
       title: "Banco com problema",
       message,
-      severity: "critical",
+      severity: databaseProblemSeverity(database),
       status: "open",
       openedAt: database.checkedAt || database.updatedAt || client.updatedAt || client.lastSeenAt,
       details: {
@@ -2876,6 +3030,18 @@ function renderClientDetail(client) {
       <article class="ops-panel ops-panel-wide">
         <div class="ops-panel-head"><h3>Bancos Firebird</h3></div>
         ${renderDatabaseSummary(database, client)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide transaction-health-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Transacoes Firebird</h3>
+            <span>OIT, OAT, Next, gap e sweep por banco</span>
+          </div>
+        </div>
+        ${renderDatabaseTransactionHealth(database)}
       </article>
     </section>
 

@@ -1252,6 +1252,8 @@ function normalizeDatabasePayload(database = {}, previous = {}) {
     ok: source.ok ?? existing.ok ?? null,
     licensedUnit: source.licensedUnit || existing.licensedUnit || "",
     error: source.error || "",
+    transactionHealth: source.transactionHealth ?? source.indexHealth?.transactionHealth ?? existing.transactionHealth ?? existing.indexHealth?.transactionHealth ?? null,
+    transactionGap: source.transactionGap ?? source.indexHealth?.transactionGap ?? existing.transactionGap ?? existing.indexHealth?.transactionGap ?? null,
     indexHealth: source.indexHealth ?? existing.indexHealth ?? null,
     indexAudit: normalizeIndexAudit(source.indexAudit, existing.indexAudit),
     indexAuditHistory: existing.indexAuditHistory || [],
@@ -1562,6 +1564,21 @@ function resolveIndexAlertsIfHealthy(db, installation) {
   });
 }
 
+function databaseTransactionGapInfo(database = {}) {
+  const health = database.transactionHealth || database.indexHealth?.transactionHealth || {};
+  const gapFromPayload = database.transactionGap?.gap ?? database.indexHealth?.transactionGap?.gap ?? database.gap ?? null;
+  const oldest = Number(health.oldestTransaction ?? database.oldestTransaction ?? database.indexHealth?.oldestTransaction);
+  const next = Number(health.nextTransaction ?? database.nextTransaction ?? database.indexHealth?.nextTransaction);
+  const gap = Number.isFinite(Number(gapFromPayload))
+    ? Number(gapFromPayload)
+    : Number.isFinite(oldest) && Number.isFinite(next)
+      ? Math.max(0, next - oldest)
+      : null;
+  const critical = Number(database.transactionGap?.criticalThreshold ?? database.indexHealth?.transactionGap?.criticalThreshold ?? 1000000);
+  const warning = Number(database.transactionGap?.warningThreshold ?? database.indexHealth?.transactionGap?.warningThreshold ?? 500000);
+  return { gap, critical, warning };
+}
+
 function databaseProblem(database = {}) {
   const status = String(database.status || database.state || database.healthStatus || "").toLowerCase();
   const error = database.error || database.lastError || database.connectionError || database.health?.error || "";
@@ -1570,7 +1587,26 @@ function databaseProblem(database = {}) {
   if (["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) {
     return `status ${status}`;
   }
+  const transaction = databaseTransactionGapInfo(database);
+  if (Number.isFinite(Number(transaction.gap)) && transaction.gap >= transaction.critical) {
+    return `gap transacional Firebird critico: ${Math.round(transaction.gap).toLocaleString("pt-BR")}`;
+  }
+  if (Number.isFinite(Number(transaction.gap)) && transaction.gap >= transaction.warning) {
+    return `gap transacional Firebird em atencao: ${Math.round(transaction.gap).toLocaleString("pt-BR")}`;
+  }
   return "";
+}
+
+function databaseProblemSeverity(database = {}) {
+  const status = String(database.status || database.state || database.healthStatus || "").toLowerCase();
+  const error = database.error || database.lastError || database.connectionError || database.health?.error || "";
+  if (database.ok === false || error || ["error", "erro", "offline", "unavailable", "failed", "falha", "failure"].includes(status)) {
+    return "critical";
+  }
+  const transaction = databaseTransactionGapInfo(database);
+  if (Number.isFinite(Number(transaction.gap)) && transaction.gap >= transaction.critical) return "critical";
+  if (Number.isFinite(Number(transaction.gap)) && transaction.gap >= transaction.warning) return "warning";
+  return "warning";
 }
 
 function databaseAlertCode(database = {}) {
@@ -1605,7 +1641,7 @@ function syncDatabaseHealthAlerts(db, installation) {
     if (existing) {
       existing.title = databaseAlertTitle(database);
       existing.message = problem;
-      existing.severity = "critical";
+      existing.severity = databaseProblemSeverity(database);
       existing.details = details;
       existing.updatedAt = nowIso();
       return;
@@ -1617,7 +1653,7 @@ function syncDatabaseHealthAlerts(db, installation) {
       title: databaseAlertTitle(database),
       message: problem,
       code,
-      severity: "critical",
+      severity: databaseProblemSeverity(database),
       status: "open",
       details,
       openedAt: nowIso(),

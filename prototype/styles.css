@@ -1813,6 +1813,10 @@ tr.clickable-row:hover,
   fill: url(#memory-area-gradient);
 }
 
+.chart-area.firebird-memory {
+  fill: url(#firebird-memory-area-gradient);
+}
+
 .chart-line {
   fill: none;
   stroke-linecap: round;
@@ -1839,6 +1843,10 @@ tr.clickable-row:hover,
 
 .temperature-chart svg {
   min-height: 180px;
+}
+
+.firebird-performance-chart svg {
+  min-height: 210px;
 }
 
 .performance-stats {
@@ -1992,6 +2000,56 @@ tr.clickable-row:hover,
 
 .database-row strong,
 .database-history-title strong {
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+
+.transaction-health-list {
+  display: grid;
+  gap: 10px;
+}
+
+.transaction-health-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) repeat(5, minmax(110px, 1fr));
+  gap: 10px;
+  border: 1px solid var(--ops-line);
+  border-left: 4px solid #42c7ce;
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ops-panel-strong);
+}
+
+.transaction-health-row.warning {
+  border-left-color: #e1a23a;
+}
+
+.transaction-health-row.offline {
+  border-left-color: #ef6b6b;
+}
+
+.transaction-health-row.online {
+  border-left-color: #39c87a;
+}
+
+.transaction-health-row.unknown {
+  border-left-color: #8aa0b8;
+}
+
+.transaction-health-row > div,
+.transaction-health-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transaction-health-row span,
+.transaction-health-row small {
+  color: var(--ops-muted);
+  font-size: 12px;
+}
+
+.transaction-health-row strong {
   color: var(--ops-text);
   overflow-wrap: anywhere;
 }
@@ -2675,7 +2733,8 @@ tr:last-child td {
   .client-form,
   .service-header,
   .service-row,
-  .database-row {
+  .database-row,
+  .transaction-health-row {
     grid-template-columns: 1fr;
   }
 
