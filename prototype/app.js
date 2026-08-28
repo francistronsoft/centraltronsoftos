@@ -1937,6 +1937,65 @@ function renderDatabaseTransactionHealth(databaseInfo = {}) {
   `;
 }
 
+function firebirdSessionsForDatabase(database = {}) {
+  const sessions = database.firebirdSessions || database.sessions || database.activeSessions || [];
+  return Array.isArray(sessions) ? sessions.filter(Boolean).slice(0, 50) : [];
+}
+
+function firebirdSessionTone(session = {}) {
+  const process = String(session.remoteProcess || "").toLowerCase();
+  if (process.includes("gbak") || process.includes("nbackup") || process.includes("backup")) return "warning";
+  if (!session.disconnectedAt) return "online";
+  return "unknown";
+}
+
+function firebirdSessionDuration(session = {}) {
+  if (Number.isFinite(Number(session.durationSeconds))) {
+    return durationLabelFromMs(Number(session.durationSeconds) * 1000);
+  }
+  const start = new Date(session.firstSeenAt || session.connectedAt || "").getTime();
+  const end = new Date(session.disconnectedAt || session.lastSeenAt || Date.now()).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "-";
+  return durationLabelFromMs(end - start);
+}
+
+function renderFirebirdSessions(databaseInfo = {}) {
+  const databases = monitoredDatabases(databaseInfo);
+  const rows = databases.flatMap((database) => {
+    const databaseName = databaseDisplayName(database);
+    const databaseAlias = databaseDisplayAlias(database);
+    return firebirdSessionsForDatabase(database).map((session) => ({
+      ...session,
+      databaseName,
+      databaseAlias
+    }));
+  });
+  if (!rows.length) {
+    return `<p class="empty-note">Nenhuma sessao Firebird recebida ainda. A instalacao precisa enviar o historico de sessoes no proximo heartbeat.</p>`;
+  }
+  return `
+    <div class="firebird-session-list">
+      ${rows.map((session) => {
+        const active = !session.disconnectedAt;
+        const process = compactText(session.remoteProcess || "processo nao informado", 86);
+        return `
+          <article class="firebird-session-row ${escapeHtml(firebirdSessionTone(session))}">
+            <div class="firebird-session-title">
+              <strong>${escapeHtml(session.remoteAddress || "IP nao informado")}</strong>
+              <span>${escapeHtml(session.databaseAlias || session.databaseName || "Banco Firebird")}</span>
+            </div>
+            <div><span>Processo</span><strong title="${escapeHtml(session.remoteProcess || "")}">${escapeHtml(process)}</strong></div>
+            <div><span>PID</span><strong>${escapeHtml(integerLabel(session.remotePid))}</strong></div>
+            <div><span>Conectou</span><strong>${escapeHtml(session.connectedAt ? formatDateTime(session.connectedAt) : "-")}</strong></div>
+            <div><span>Duracao</span><strong>${escapeHtml(firebirdSessionDuration(session))}</strong><small>${escapeHtml(active ? "ativa" : `encerrou ${formatDateTime(session.disconnectedAt)}`)}</small></div>
+            <div><span>Ultimo visto</span><strong>${escapeHtml(session.lastSeenAt ? formatDateTime(session.lastSeenAt) : "-")}</strong><small>${escapeHtml(session.lastState || "")}</small></div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function databaseDisplayName(database = {}) {
   return database.databaseName || database.name || database.databaseAlias || database.alias || "Banco Firebird";
 }
@@ -3042,6 +3101,18 @@ function renderClientDetail(client) {
           </div>
         </div>
         ${renderDatabaseTransactionHealth(database)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide firebird-sessions-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Sessoes Firebird</h3>
+            <span>IP, processo, PID e conexoes recentes por banco</span>
+          </div>
+        </div>
+        ${renderFirebirdSessions(database)}
       </article>
     </section>
 

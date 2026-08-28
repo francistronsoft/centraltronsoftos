@@ -2054,6 +2054,56 @@ tr.clickable-row:hover,
   overflow-wrap: anywhere;
 }
 
+.firebird-session-list {
+  display: grid;
+  gap: 10px;
+}
+
+.firebird-session-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.9fr) minmax(220px, 1.3fr) repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+  border: 1px solid var(--ops-line);
+  border-left: 4px solid #42c7ce;
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ops-panel-strong);
+}
+
+.firebird-session-row.warning {
+  border-left-color: #e1a23a;
+}
+
+.firebird-session-row.offline {
+  border-left-color: #ef6b6b;
+}
+
+.firebird-session-row.online {
+  border-left-color: #39c87a;
+}
+
+.firebird-session-row.unknown {
+  border-left-color: #8aa0b8;
+}
+
+.firebird-session-row > div,
+.firebird-session-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.firebird-session-row span,
+.firebird-session-row small {
+  color: var(--ops-muted);
+  font-size: 12px;
+}
+
+.firebird-session-row strong {
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+
 .database-history-block {
   display: grid;
   gap: 10px;
@@ -2734,7 +2784,8 @@ tr:last-child td {
   .service-header,
   .service-row,
   .database-row,
-  .transaction-health-row {
+  .transaction-health-row,
+  .firebird-session-row {
     grid-template-columns: 1fr;
   }
 

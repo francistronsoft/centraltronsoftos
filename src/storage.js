@@ -81,6 +81,9 @@ function compactBackups(backups = {}) {
 function compactDatabase(database = {}) {
   if (!database || typeof database !== "object") return {};
   const next = { ...database };
+  if (Array.isArray(next.firebirdSessions)) {
+    next.firebirdSessions = next.firebirdSessions.slice(0, 50);
+  }
   if (next.indexHealth && typeof next.indexHealth === "object") {
     const health = next.indexHealth;
     next.indexHealth = {

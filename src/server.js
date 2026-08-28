@@ -1227,6 +1227,28 @@ function databaseIdentity(database = {}) {
   return String(database.databaseAlias || database.alias || database.id || database.databaseName || database.name || "").trim().toLowerCase();
 }
 
+function normalizeFirebirdSessions(sessions = null, previous = null) {
+  const source = Array.isArray(sessions) ? sessions : Array.isArray(previous) ? previous : [];
+  return source
+    .filter(session => session && typeof session === "object")
+    .map(session => ({
+      id: session.id || session.sessionKey || "",
+      attachmentId: session.attachmentId ?? null,
+      user: session.user || session.userName || "",
+      remoteAddress: session.remoteAddress || session.address || "",
+      remoteProcess: session.remoteProcess || session.process || "",
+      remotePid: session.remotePid ?? session.pid ?? null,
+      connectedAt: session.connectedAt || null,
+      firstSeenAt: session.firstSeenAt || null,
+      lastSeenAt: session.lastSeenAt || null,
+      disconnectedAt: session.disconnectedAt || null,
+      lastState: session.lastState || session.state || "",
+      sourceNode: session.sourceNode || "",
+      durationSeconds: Number.isFinite(Number(session.durationSeconds)) ? Number(session.durationSeconds) : null
+    }))
+    .slice(0, 50);
+}
+
 function normalizeDatabasePayload(database = {}, previous = {}) {
   const source = database && typeof database === "object" ? database : {};
   const existing = previous && typeof previous === "object" ? previous : {};
@@ -1254,6 +1276,7 @@ function normalizeDatabasePayload(database = {}, previous = {}) {
     error: source.error || "",
     transactionHealth: source.transactionHealth ?? source.indexHealth?.transactionHealth ?? existing.transactionHealth ?? existing.indexHealth?.transactionHealth ?? null,
     transactionGap: source.transactionGap ?? source.indexHealth?.transactionGap ?? existing.transactionGap ?? existing.indexHealth?.transactionGap ?? null,
+    firebirdSessions: normalizeFirebirdSessions(source.firebirdSessions ?? source.sessions ?? source.activeSessions, existing.firebirdSessions ?? existing.sessions),
     indexHealth: source.indexHealth ?? existing.indexHealth ?? null,
     indexAudit: normalizeIndexAudit(source.indexAudit, existing.indexAudit),
     indexAuditHistory: existing.indexAuditHistory || [],
