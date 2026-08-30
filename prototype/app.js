@@ -1978,12 +1978,14 @@ function renderFirebirdSessions(databaseInfo = {}) {
       ${rows.map((session) => {
         const active = !session.disconnectedAt;
         const process = compactText(session.remoteProcess || "processo nao informado", 86);
+        const sessionLabel = session.attachmentId ?? session.sessionKey ?? session.id ?? "-";
         return `
           <article class="firebird-session-row ${escapeHtml(firebirdSessionTone(session))}">
             <div class="firebird-session-title">
               <strong>${escapeHtml(session.remoteAddress || "IP nao informado")}</strong>
               <span>${escapeHtml(session.databaseAlias || session.databaseName || "Banco Firebird")}</span>
             </div>
+            <div><span>Sessao</span><strong>${escapeHtml(sessionLabel)}</strong><small>${escapeHtml(session.user || "usuario nao informado")}</small></div>
             <div><span>Processo</span><strong title="${escapeHtml(session.remoteProcess || "")}">${escapeHtml(process)}</strong></div>
             <div><span>PID</span><strong>${escapeHtml(integerLabel(session.remotePid))}</strong></div>
             <div><span>Conectou</span><strong>${escapeHtml(session.connectedAt ? formatDateTime(session.connectedAt) : "-")}</strong></div>
@@ -3109,7 +3111,7 @@ function renderClientDetail(client) {
         <div class="ops-panel-head">
           <div>
             <h3>Sessoes Firebird</h3>
-            <span>IP, processo, PID e conexoes recentes por banco</span>
+            <span>sessao, IP, processo, PID e conexoes recentes por banco</span>
           </div>
         </div>
         ${renderFirebirdSessions(database)}

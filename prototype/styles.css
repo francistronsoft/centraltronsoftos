@@ -2061,7 +2061,7 @@ tr.clickable-row:hover,
 
 .firebird-session-row {
   display: grid;
-  grid-template-columns: minmax(170px, 0.9fr) minmax(220px, 1.3fr) repeat(4, minmax(110px, 1fr));
+  grid-template-columns: minmax(170px, 0.9fr) minmax(100px, 0.7fr) minmax(220px, 1.3fr) repeat(4, minmax(110px, 1fr));
   gap: 10px;
   border: 1px solid var(--ops-line);
   border-left: 4px solid #42c7ce;

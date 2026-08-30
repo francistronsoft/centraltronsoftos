@@ -1233,6 +1233,7 @@ function normalizeFirebirdSessions(sessions = null, previous = null) {
     .filter(session => session && typeof session === "object")
     .map(session => ({
       id: session.id || session.sessionKey || "",
+      sessionKey: session.sessionKey || session.id || "",
       attachmentId: session.attachmentId ?? null,
       user: session.user || session.userName || "",
       remoteAddress: session.remoteAddress || session.address || "",
