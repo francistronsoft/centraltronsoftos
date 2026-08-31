@@ -1205,12 +1205,25 @@ function normalizeIndexAudit(audit = null, previous = null) {
   const totalIndexes = audit.totalIndexes ?? audit.total ?? null;
   const inactiveDelta = audit.inactiveDelta ?? audit.delta ?? null;
   const checkedAt = audit.checkedAt || audit.collectedAt || nowIso();
+  const normalizedTotal = Number.isFinite(Number(totalIndexes)) ? Number(totalIndexes) : null;
+  const normalizedActive = Number.isFinite(Number(activeIndexes)) ? Number(activeIndexes) : null;
+  const normalizedInactive = Number.isFinite(Number(inactiveIndexes)) ? Number(inactiveIndexes) : null;
+  const previousHasIndexes = Number(previous?.totalIndexes || 0) > 0 || Number(previous?.activeIndexes || 0) > 0 || Number(previous?.inactiveIndexes || 0) > 0;
+  const nextIsEmptySnapshot = normalizedTotal === 0 && normalizedActive === 0 && normalizedInactive === 0;
+  if (previous && previousHasIndexes && nextIsEmptySnapshot) {
+    return {
+      ...previous,
+      checkedAt,
+      lastEmptySnapshotAt: checkedAt,
+      lastEmptySnapshotIgnored: true
+    };
+  }
   return {
     status: audit.status || (Number(inactiveIndexes) > 0 ? "attention" : "ok"),
     checkedAt,
-    totalIndexes: Number.isFinite(Number(totalIndexes)) ? Number(totalIndexes) : null,
-    activeIndexes: Number.isFinite(Number(activeIndexes)) ? Number(activeIndexes) : null,
-    inactiveIndexes: Number.isFinite(Number(inactiveIndexes)) ? Number(inactiveIndexes) : null,
+    totalIndexes: normalizedTotal,
+    activeIndexes: normalizedActive,
+    inactiveIndexes: normalizedInactive,
     previousInactiveIndexes: Number.isFinite(Number(audit.previousInactiveIndexes)) ? Number(audit.previousInactiveIndexes) : null,
     inactiveDelta: Number.isFinite(Number(inactiveDelta)) ? Number(inactiveDelta) : 0,
     firstSnapshot: audit.firstSnapshot === true,
@@ -1374,6 +1387,7 @@ function appendIndexAuditItemHistory(database = {}) {
   const audit = database.indexAudit;
   if (!audit || typeof audit !== "object") return database;
   if (!Number.isFinite(Number(audit.inactiveIndexes))) return database;
+  if (audit.lastEmptySnapshotIgnored === true) return database;
 
   const history = Array.isArray(database.indexAuditHistory)
     ? database.indexAuditHistory.filter((item) => item && item.checkedAt)

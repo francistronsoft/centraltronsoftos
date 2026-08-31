@@ -2161,21 +2161,35 @@ function renderIndexNames(names = [], emptyText = "sem itens") {
   return names.slice(0, 8).map((name) => `<code>${escapeHtml(name)}</code>`).join("");
 }
 
+function indexAuditHasIndexes(audit = {}) {
+  return Number(audit?.totalIndexes || 0) > 0
+    || Number(audit?.activeIndexes || 0) > 0
+    || Number(audit?.inactiveIndexes || 0) > 0;
+}
+
+function indexAuditSummarySource(audit = null, history = []) {
+  if (indexAuditHasIndexes(audit)) return audit;
+  const fallback = [...history].reverse().find(indexAuditHasIndexes);
+  return fallback || audit || null;
+}
+
 function renderIndexAuditHistory(database = {}) {
   const audit = database.indexAudit;
   const history = Array.isArray(database.indexAuditHistory) ? database.indexAuditHistory : [];
   const rows = history.length ? history.slice(-8).reverse() : (audit ? [audit] : []);
+  const summary = indexAuditSummarySource(audit, history);
   if (!rows.length) {
     return `<p class="empty-note">Nenhum historico de indices recebido ainda.</p>`;
   }
 
   return `
     <div class="index-audit-summary">
-      <span>Total <strong>${escapeHtml(audit?.totalIndexes ?? "-")}</strong></span>
-      <span>Ativos <strong>${escapeHtml(audit?.activeIndexes ?? "-")}</strong></span>
-      <span>Inativos <strong>${escapeHtml(audit?.inactiveIndexes ?? "-")}</strong></span>
-      <span>Delta <strong>${escapeHtml(Number(audit?.inactiveDelta || 0) > 0 ? `+${audit.inactiveDelta}` : audit?.inactiveDelta ?? "0")}</strong></span>
+      <span>Total <strong>${escapeHtml(summary?.totalIndexes ?? "-")}</strong></span>
+      <span>Ativos <strong>${escapeHtml(summary?.activeIndexes ?? "-")}</strong></span>
+      <span>Inativos <strong>${escapeHtml(summary?.inactiveIndexes ?? "-")}</strong></span>
+      <span>Delta <strong>${escapeHtml(Number(summary?.inactiveDelta || 0) > 0 ? `+${summary.inactiveDelta}` : summary?.inactiveDelta ?? "0")}</strong></span>
     </div>
+    ${audit?.lastEmptySnapshotIgnored ? `<p class="empty-note">Ultima coleta zerada ignorada no resumo: ${escapeHtml(formatDateTime(audit.lastEmptySnapshotAt || audit.checkedAt))}.</p>` : ""}
     <div class="index-audit-timeline">
       ${rows.map((row) => {
         const inactive = Number(row.inactiveIndexes ?? 0);
