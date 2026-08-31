@@ -2059,6 +2059,44 @@ tr.clickable-row:hover,
   gap: 10px;
 }
 
+.firebird-session-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.firebird-session-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--ops-panel-strong);
+  color: var(--ops-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.firebird-session-filter strong {
+  min-width: 22px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: var(--ops-panel);
+  color: var(--ops-text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.firebird-session-filter.active {
+  border-color: #39c87a;
+  background: rgba(57, 200, 122, 0.12);
+  color: var(--ops-text);
+}
+
 .firebird-session-row {
   display: grid;
   grid-template-columns: minmax(170px, 0.9fr) minmax(100px, 0.7fr) minmax(220px, 1.3fr) repeat(4, minmax(110px, 1fr));

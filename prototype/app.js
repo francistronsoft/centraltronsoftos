@@ -28,6 +28,7 @@ let backupPollTimer = null;
 let geoLeafletMap = null;
 let geoLeafletLayer = null;
 let selectedClientId = "";
+let firebirdSessionFilter = "active";
 let previousDetailView = "clients";
 let lastDataRefreshAt = null;
 let dashboardRefreshTimer = null;
@@ -1943,20 +1944,61 @@ function firebirdSessionsForDatabase(database = {}) {
 }
 
 function firebirdSessionTone(session = {}) {
+  if (firebirdSessionIsSuspicious(session)) return "warning";
   const process = String(session.remoteProcess || "").toLowerCase();
   if (process.includes("gbak") || process.includes("nbackup") || process.includes("backup")) return "warning";
   if (!session.disconnectedAt) return "online";
   return "unknown";
 }
 
-function firebirdSessionDuration(session = {}) {
+function firebirdSessionDurationMs(session = {}) {
   if (Number.isFinite(Number(session.durationSeconds))) {
-    return durationLabelFromMs(Number(session.durationSeconds) * 1000);
+    return Number(session.durationSeconds) * 1000;
   }
   const start = new Date(session.firstSeenAt || session.connectedAt || "").getTime();
   const end = new Date(session.disconnectedAt || session.lastSeenAt || Date.now()).getTime();
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return "-";
-  return durationLabelFromMs(end - start);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, end - start);
+}
+
+function firebirdSessionDuration(session = {}) {
+  const durationMs = firebirdSessionDurationMs(session);
+  return Number.isFinite(durationMs) ? durationLabelFromMs(durationMs) : "-";
+}
+
+function firebirdSessionIsSuspicious(session = {}) {
+  const process = String(session.remoteProcess || "").toLowerCase();
+  const state = String(session.lastState || "").toLowerCase();
+  const durationMs = firebirdSessionDurationMs(session);
+  const lastSeenMs = new Date(session.lastSeenAt || "").getTime();
+  const disconnectedMs = new Date(session.disconnectedAt || "").getTime();
+  const active = !session.disconnectedAt;
+  const longRunning = Number.isFinite(durationMs) && durationMs >= 4 * 60 * 60 * 1000;
+  const staleActive = active && Number.isFinite(lastSeenMs) && (Date.now() - lastSeenMs) >= 15 * 60 * 1000;
+  const inconsistentClosed = Number.isFinite(disconnectedMs) && state.includes("active");
+  const maintenanceProcess = /gbak|gfix|nbackup|backup|restore|sweep/.test(process);
+  return longRunning || staleActive || inconsistentClosed || maintenanceProcess;
+}
+
+function firebirdSessionStatus(session = {}) {
+  if (firebirdSessionIsSuspicious(session)) return "suspicious";
+  if (session.disconnectedAt) return "closed";
+  return "active";
+}
+
+function firebirdSessionFilterLabel(filter) {
+  if (filter === "active") return "ativas";
+  if (filter === "closed") return "encerradas";
+  if (filter === "suspicious") return "suspeitas";
+  return "todas";
+}
+
+function setFirebirdSessionFilter(filter) {
+  firebirdSessionFilter = ["active", "closed", "suspicious", "all"].includes(filter) ? filter : "active";
+  if (activeView === "client-detail" && selectedClientId) {
+    const selected = currentClients.find((client) => client.detailId === selectedClientId || client.id === selectedClientId);
+    if (selected) renderClientDetail(selected);
+  }
 }
 
 function renderFirebirdSessions(databaseInfo = {}) {
@@ -1973,17 +2015,42 @@ function renderFirebirdSessions(databaseInfo = {}) {
   if (!rows.length) {
     return `<p class="empty-note">Nenhuma sessao Firebird recebida ainda. A instalacao precisa enviar o historico de sessoes no proximo heartbeat.</p>`;
   }
+  const counts = rows.reduce((acc, session) => {
+    const status = firebirdSessionStatus(session);
+    acc[status] = (acc[status] || 0) + 1;
+    acc.all += 1;
+    return acc;
+  }, { active: 0, closed: 0, suspicious: 0, all: 0 });
+  const visibleRows = firebirdSessionFilter === "all"
+    ? rows
+    : rows.filter((session) => firebirdSessionStatus(session) === firebirdSessionFilter);
+  const filterItems = [
+    ["active", "Ativas", counts.active],
+    ["suspicious", "Suspeitas", counts.suspicious],
+    ["closed", "Encerradas", counts.closed],
+    ["all", "Todas", counts.all]
+  ];
   return `
+    <div class="firebird-session-toolbar" role="group" aria-label="Filtro de sessoes Firebird">
+      ${filterItems.map(([key, label, count]) => `
+        <button type="button" class="firebird-session-filter ${firebirdSessionFilter === key ? "active" : ""}" onclick="setFirebirdSessionFilter('${escapeHtml(key)}')">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(integerLabel(count))}</strong>
+        </button>
+      `).join("")}
+    </div>
     <div class="firebird-session-list">
-      ${rows.map((session) => {
+      ${visibleRows.length ? visibleRows.map((session) => {
         const active = !session.disconnectedAt;
         const process = compactText(session.remoteProcess || "processo nao informado", 86);
         const sessionLabel = session.attachmentId ?? session.sessionKey ?? session.id ?? "-";
+        const sessionStatus = firebirdSessionStatus(session);
         return `
           <article class="firebird-session-row ${escapeHtml(firebirdSessionTone(session))}">
             <div class="firebird-session-title">
               <strong>${escapeHtml(session.remoteAddress || "IP nao informado")}</strong>
               <span>${escapeHtml(session.databaseAlias || session.databaseName || "Banco Firebird")}</span>
+              <small>${escapeHtml(firebirdSessionFilterLabel(sessionStatus))}</small>
             </div>
             <div><span>Sessao</span><strong>${escapeHtml(sessionLabel)}</strong><small>${escapeHtml(session.user || "usuario nao informado")}</small></div>
             <div><span>Processo</span><strong title="${escapeHtml(session.remoteProcess || "")}">${escapeHtml(process)}</strong></div>
@@ -1993,7 +2060,7 @@ function renderFirebirdSessions(databaseInfo = {}) {
             <div><span>Ultimo visto</span><strong>${escapeHtml(session.lastSeenAt ? formatDateTime(session.lastSeenAt) : "-")}</strong><small>${escapeHtml(session.lastState || "")}</small></div>
           </article>
         `;
-      }).join("")}
+      }).join("") : `<p class="empty-note">Nenhuma sessao ${escapeHtml(firebirdSessionFilterLabel(firebirdSessionFilter))} neste heartbeat.</p>`}
     </div>
   `;
 }
