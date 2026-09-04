@@ -1191,7 +1191,84 @@ function environmentHaStatus(client) {
   const mode = String(cluster.mode || cluster.status?.mode || "").toLowerCase();
   const enabled = cluster.enabled === true || cluster.haEnabled === true || cluster.keepalived?.enabled === true;
   const hasStandby = Boolean(cluster.standby || cluster.peer || cluster.nodes?.length > 1);
-  return mode === "ha" || enabled || hasStandby;
+  const hasHaState = Boolean(cluster.sync?.standbyHost || cluster.standbyHealth || cluster.standbyDashboard || cluster.vip || cluster.activeNode || cluster.lock?.active_node);
+  return mode === "ha" || enabled || hasStandby || hasHaState;
+}
+
+function haNodeRoleLabel(role) {
+  const value = String(role || "").toLowerCase();
+  const labels = {
+    primary: "Primary",
+    standby: "Standby",
+    recovery: "Recovery"
+  };
+  return labels[value] || value || "-";
+}
+
+function haNodeName(cluster = {}, host = {}) {
+  return cluster.nodeName || cluster.identity?.nodeName || host.hostname || "-";
+}
+
+function haActiveNodeName(cluster = {}, host = {}) {
+  return cluster.activeNode
+    || cluster.lock?.active_node
+    || cluster.guard?.activeNode
+    || cluster.vipStatus?.holder?.nodeName
+    || (String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase() === "primary" ? haNodeName(cluster, host) : "");
+}
+
+function standbyDashboardPayload(cluster = {}) {
+  return cluster.standbyDashboard
+    || cluster.standby?.dashboard
+    || cluster.peerDashboard
+    || cluster.sync?.standbyDashboard
+    || null;
+}
+
+function standbyNodeInfo(cluster = {}) {
+  const dashboard = standbyDashboardPayload(cluster) || {};
+  const standbyCluster = dashboard.cluster || {};
+  const healthNode = cluster.standbyHealth?.node || {};
+  const tronfireStandby = cluster.sync?.tronfireStandby || {};
+  const host = dashboard.host || {};
+  return {
+    dashboard,
+    name: standbyCluster.nodeName
+      || healthNode.nodeName
+      || dashboard.nodeName
+      || host.hostname
+      || cluster.sync?.standbyHost
+      || "-",
+    role: standbyCluster.nodeRole
+      || healthNode.nodeRole
+      || tronfireStandby.nodeRole
+      || dashboard.nodeRole
+      || "",
+    ok: dashboard.ok !== false && (cluster.standbyHealth?.ok !== false),
+    error: dashboard.error || cluster.standbyHealth?.error || "",
+    url: dashboard.url || cluster.standbyHealth?.url || ""
+  };
+}
+
+function haRecoveryInfo(cluster = {}, host = {}) {
+  const localRole = String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase();
+  if (localRole === "recovery" || cluster.recoveryActive === true) {
+    return { active: true, node: haNodeName(cluster, host), detail: "no local em recovery" };
+  }
+  const standby = standbyNodeInfo(cluster);
+  if (String(standby.role || "").toLowerCase() === "recovery" || standby.dashboard?.cluster?.recovery === true) {
+    return { active: true, node: standby.name, detail: "standby em recovery" };
+  }
+  return { active: false, node: "-", detail: "nenhum no em recovery informado" };
+}
+
+function haEnvironmentLabel(client) {
+  const cluster = client.installation?.cluster || client.cluster || {};
+  if (!environmentHaStatus(client)) return "Sem HA";
+  const activeNode = haActiveNodeName(cluster, client.host);
+  const recovery = haRecoveryInfo(cluster, client.host);
+  if (recovery.active) return `Recovery: ${recovery.node}`;
+  return activeNode ? `Ativo: ${activeNode}` : "HA ativo";
 }
 
 function renderClients(filter = "") {
@@ -1363,6 +1440,7 @@ function renderEnvironments() {
       const paired = Boolean(client.installation);
       const supportsHa = environmentPlatform(client) !== "windows";
       const hasHa = supportsHa && environmentHaStatus(client);
+      const haLabel = hasHa ? haEnvironmentLabel(client) : "Sem HA";
       const status = client.rawClient?.status === "inactive" ? "inactive" : (paired ? monitorStatus(client) : "unknown");
       const documentValue = client.rawClient?.document || "-";
       const pairing = paired
@@ -1376,7 +1454,7 @@ function renderEnvironments() {
           <td>${escapeHtml(documentValue)}</td>
           <td>${escapeHtml(client.reseller)}</td>
           <td>${pairing}</td>
-          <td><span class="index-pill ${supportsHa ? (hasHa ? "online" : "unknown") : "neutral"}">${supportsHa ? (hasHa ? "Com HA" : "Sem HA") : "N/A"}</span></td>
+          <td><span class="index-pill ${supportsHa ? (hasHa ? "online" : "unknown") : "neutral"}">${supportsHa ? escapeHtml(haLabel) : "N/A"}</span></td>
           <td>${escapeHtml(client.environment || "Ambiente principal")}</td>
           <td><span class="status ${escapeHtml(status)}">${escapeHtml(status === "inactive" ? "Inativo" : (paired ? (statusLabels[status] || status) : "Pendente"))}</span></td>
           <td>${escapeHtml(database || "-")}</td>
@@ -2983,6 +3061,176 @@ function renderServiceInventory(services = {}, platform = "") {
   `;
 }
 
+function standbyClientView(client) {
+  const cluster = client.cluster || {};
+  const standby = standbyDashboardPayload(cluster) || {};
+  const standbyCluster = standby.cluster || {};
+  const standbyHost = standby.host || {};
+  const version = standby.build?.version
+    || standby.tronsoftos?.version
+    || standby.version
+    || cluster.standbyHealth?.version
+    || "-";
+  return {
+    ...client,
+    environment: "Standby HA",
+    version,
+    database: databaseVersion({ database: standby.database || {} }),
+    databaseInfo: standby.database || {},
+    host: standbyHost,
+    backups: standby.backups || {},
+    metrics: standby.metrics || {},
+    services: standby.services || {},
+    cluster: standbyCluster,
+    diskPercent: diskPercent({ backups: standby.backups || {}, metrics: standby.metrics || {}, host: standbyHost, database: standby.database || {} }),
+    backup: backupSummary({ backups: standby.backups || {} }),
+    lastSeenAt: standby.collectedAt || null,
+    lastSeen: formatDateTime(standby.collectedAt)
+  };
+}
+
+function renderHaOperationalPanel(client) {
+  const cluster = client.cluster || {};
+  const hasHa = environmentHaStatus(client);
+  if (!hasHa) return "";
+  const activeNode = haActiveNodeName(cluster, client.host);
+  const localRole = haNodeRoleLabel(cluster.nodeRole || cluster.identity?.nodeRole);
+  const localNode = haNodeName(cluster, client.host);
+  const standby = standbyNodeInfo(cluster);
+  const recovery = haRecoveryInfo(cluster, client.host);
+  const vip = cluster.vipStatus?.vip || cluster.vip || "-";
+  const vipHolder = cluster.vipStatus?.holder?.nodeName || activeNode || "-";
+  const standbyReady = cluster.sync?.standbyReady === true
+    ? "Sim"
+    : cluster.sync?.standbyReady === false
+      ? "Nao"
+      : "-";
+  const lag = cluster.sync?.standbyLagMinutes !== undefined && cluster.sync?.standbyLagMinutes !== null
+    ? `${cluster.sync.standbyLagMinutes} min`
+    : "-";
+  const syncTone = cluster.sync?.status === "failed"
+    ? "offline"
+    : cluster.sync?.standbyReady === false
+      ? "warning"
+      : "online";
+  const recoveryTone = recovery.active ? "warning" : "online";
+  const activeTone = activeNode ? "online" : "warning";
+  return `
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide ha-overview-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>HA operacional</h3>
+            <span>nó ativo, recovery, VIP e estado do standby</span>
+          </div>
+          <span class="ops-chip ${escapeHtml(recovery.active ? "warning" : "online")}">${escapeHtml(recovery.active ? "Recovery ativo" : "HA ativo")}</span>
+        </div>
+        <section class="ops-metrics compact-metrics ha-metrics">
+          ${detailMetric("No ativo", activeNode || "-", activeTone, `VIP em ${vipHolder}`)}
+          ${detailMetric("No local", localNode, "neutral", localRole)}
+          ${detailMetric("Standby", standby.name, standby.ok ? "online" : "warning", standby.role ? haNodeRoleLabel(standby.role) : standby.error || standby.url || "status remoto")}
+          ${detailMetric("Recovery", recovery.active ? recovery.node : "Nao", recoveryTone, recovery.detail)}
+          ${detailMetric("Standby pronto", standbyReady, syncTone, `lag ${lag}`)}
+          ${detailMetric("VIP", vip, cluster.vipStatus?.ok === true ? "online" : "warning", cluster.vipStatus?.reachable === true ? "respondendo" : "sem confirmacao")}
+        </section>
+      </article>
+    </section>
+  `;
+}
+
+function renderStandbyGuide(client) {
+  const cluster = client.cluster || {};
+  if (!environmentHaStatus(client)) return "";
+  const standby = standbyDashboardPayload(cluster);
+  const standbyInfo = standbyNodeInfo(cluster);
+  if (!standby) {
+    return `
+      <section class="ops-grid">
+        <article class="ops-panel ops-panel-wide standby-guide-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Guia Standby HA</h3>
+              <span>parametros do no standby</span>
+            </div>
+            <span class="ops-chip ${escapeHtml(standbyInfo.ok ? "unknown" : "warning")}">${escapeHtml(standbyInfo.ok ? "aguardando metricas" : "sem acesso")}</span>
+          </div>
+          <div class="detail-grid compact">
+            ${detailItem("Host standby", standbyInfo.name)}
+            ${detailItem("Papel", haNodeRoleLabel(standbyInfo.role))}
+            ${detailItem("URL", standbyInfo.url)}
+            ${detailItem("Erro", standbyInfo.error || "-")}
+          </div>
+          <p class="empty-note">O TronSystem precisa enviar standbyDashboard no heartbeat para a Central exibir CPU, memoria, temperatura, rede e banco do standby.</p>
+        </article>
+      </section>
+    `;
+  }
+
+  const standbyClient = standbyClientView(client);
+  const metrics = standbyClient.metrics || {};
+  const database = standbyClient.databaseInfo || {};
+  const host = standbyClient.host || {};
+  const storage = storageInfo(standbyClient);
+  const disk = gaugeValue(standbyClient.diskPercent);
+  const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
+  const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
+  const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
+  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"]);
+  const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
+  const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
+  const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
+  const standbyCluster = standby.cluster || {};
+  return `
+    <section class="standby-guide-panel">
+      <div class="standby-guide-head">
+        <div>
+          <span class="ops-eyebrow">Guia HA</span>
+          <h3>Standby</h3>
+          <p>${escapeHtml(standbyInfo.name)} - ${escapeHtml(haNodeRoleLabel(standbyInfo.role || standbyCluster.nodeRole))}</p>
+        </div>
+        <span class="ops-chip ${escapeHtml(standbyInfo.ok ? "online" : "warning")}">${escapeHtml(standbyInfo.ok ? "com leitura" : "com falha")}</span>
+      </div>
+      <section class="ops-metrics compact-metrics">
+        ${detailMetric("Heartbeat standby", standby.collectedAt ? formatRelativeTime(standby.collectedAt) : "-", standbyInfo.ok ? "online" : "warning", standby.collectedAt ? formatDateTime(standby.collectedAt) : standbyInfo.error)}
+        ${detailMetric("Papel", haNodeRoleLabel(standbyCluster.nodeRole || standbyInfo.role), String(standbyCluster.nodeRole || standbyInfo.role).toLowerCase() === "recovery" ? "warning" : "neutral", standbyCluster.activeNode ? `ativo ${standbyCluster.activeNode}` : "no standby")}
+        ${detailMetric("Banco", standbyClient.database, "neutral", "versao_banco standby")}
+        ${detailMetric("Disco", disk === null ? "--" : `${disk}%`, diskTone, storage.free !== null ? `${bytesLabel(storage.free)} livres` : "armazenamento standby")}
+      </section>
+      <section class="ops-grid ops-detail-main">
+        <div class="ops-stack">
+          <article class="ops-panel">
+            <div class="ops-panel-head"><h3>Host standby</h3></div>
+            <div class="detail-grid compact">
+              ${detailItem("Hostname", host.hostname)}
+              ${detailItem("IP", host.ip)}
+              ${detailItem("Sistema", host.os)}
+              ${detailItem("CPU", cpuModel)}
+              ${detailItem("Nucleos", host.cpuCores ?? host.processorCount ?? "-")}
+              ${detailItem("Memoria RAM", memoryTotalLabel)}
+            </div>
+          </article>
+          ${detailTemperaturePanel(standbyClient)}
+          <article class="ops-panel">
+            <div class="ops-panel-head"><h3>Bancos standby</h3></div>
+            ${renderDatabaseSummary(database, standbyClient)}
+          </article>
+        </div>
+        <div class="ops-stack">
+          <article class="ops-panel">
+            <div class="ops-panel-head"><h3>CPU / Memoria / Disco standby</h3></div>
+            ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
+          </article>
+          <article class="ops-panel">
+            <div class="ops-panel-head"><h3>Rede standby</h3></div>
+            ${networkLineChart(metrics)}
+          </article>
+          ${firebirdMetricsPanel(metrics)}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function renderClientAlerts(client) {
   const alerts = currentAlerts.filter((alert) => alert.clientId === client.id && alert.status !== "resolved" && isVisibleAlert(alert));
   const existingDatabaseAlerts = new Set(alerts.map((alert) => String(alert.details?.databaseAlias || alert.details?.databaseName || "").toLowerCase()).filter(Boolean));
@@ -3052,6 +3300,9 @@ function renderClientDetail(client) {
   const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
   const storage = storageInfo(client);
   const serverClock = serverTimeStatus(host, client.lastSeenAt);
+  const hasHa = supportsHa && environmentHaStatus(client);
+  const activeNode = hasHa ? haActiveNodeName(cluster, host) : "";
+  const recovery = hasHa ? haRecoveryInfo(cluster, host) : { active: false, node: "-", detail: "" };
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
@@ -3074,7 +3325,10 @@ function renderClientDetail(client) {
       ${detailMetric("Alertas abertos", openAlerts, openAlerts > 0 ? "warning" : "online", "eventos ativos")}
       ${detailMetric("Banco", client.database, "neutral", "versao_banco")}
       ${detailMetric("Backup", client.backup.label, client.backup.tone, client.backup.detail)}
+      ${hasHa ? detailMetric("No ativo HA", activeNode || "-", activeNode ? "online" : "warning", recovery.active ? `recovery em ${recovery.node}` : "cluster ativo") : ""}
     </section>
+
+    ${renderHaOperationalPanel(client)}
 
     <section class="ops-grid">
       <article class="ops-panel ops-panel-wide">
@@ -3224,7 +3478,10 @@ function renderClientDetail(client) {
         ${supportsHa ? `
           <div class="detail-grid compact">
             ${detailItem("Modo", cluster.mode)}
-            ${detailItem("No", cluster.identity?.nodeRole || cluster.nodeRole)}
+            ${detailItem("No local", haNodeName(cluster, host))}
+            ${detailItem("Papel local", haNodeRoleLabel(cluster.identity?.nodeRole || cluster.nodeRole))}
+            ${detailItem("No ativo", activeNode || "-")}
+            ${detailItem("Recovery", recovery.active ? recovery.node : "Nao")}
             ${detailItem("Standby pronto", cluster.sync?.standbyReady === true ? "Sim" : cluster.sync?.standbyReady === false ? "Nao" : "-")}
             ${detailItem("Lag standby", cluster.sync?.standbyLagMinutes !== undefined ? `${cluster.sync.standbyLagMinutes} min` : "-")}
             ${detailItem("Failover", cluster.failover?.enabled === true ? "Ativo" : cluster.failover?.enabled === false ? "Manual/desativado" : "-")}
@@ -3238,6 +3495,8 @@ function renderClientDetail(client) {
       <div class="ops-panel-head"><h3>Alertas e eventos</h3></div>
       <div class="detail-list alerts-detail">${renderClientAlerts(client)}</div>
     </section>
+
+    ${renderStandbyGuide(client)}
   `;
 }
 

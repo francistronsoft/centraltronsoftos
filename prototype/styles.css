@@ -931,6 +931,40 @@ p {
   width: 100%;
 }
 
+.ha-overview-panel .ha-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.standby-guide-panel {
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--ops-panel);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.16);
+}
+
+.standby-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--ops-line);
+  padding-bottom: 12px;
+}
+
+.standby-guide-head h3 {
+  margin: 4px 0;
+  color: var(--ops-text);
+  font-size: 20px;
+}
+
+.standby-guide-head p {
+  margin: 0;
+  color: var(--ops-muted);
+}
+
 .client-avatar {
   display: grid;
   flex: 0 0 auto;
