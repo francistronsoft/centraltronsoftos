@@ -3230,7 +3230,7 @@ function renderStandbyGuide(client) {
       <section class="ops-grid ops-detail-main">
         <div class="ops-stack">
           <article class="ops-panel">
-            <div class="ops-panel-head"><h3>Host standby</h3></div>
+            <div class="ops-panel-head"><h3>Servidor</h3></div>
             <div class="detail-grid compact">
               ${detailItem("Hostname", host.hostname)}
               ${detailItem("IP", host.ip)}
@@ -3238,9 +3238,20 @@ function renderStandbyGuide(client) {
               ${detailItem("CPU", cpuModel)}
               ${detailItem("Nucleos", host.cpuCores ?? host.processorCount ?? "-")}
               ${detailItem("Memoria RAM", memoryTotalLabel)}
+              ${detailItem("Uptime", metrics.hostUptimeSeconds ? `${Math.round(Number(metrics.hostUptimeSeconds) / 3600)} h` : "-")}
             </div>
           </article>
-          ${detailTemperaturePanel(standbyClient)}
+
+          <article class="ops-panel">
+            <div class="ops-panel-head">
+              <div>
+                <h3>Crescimento do banco</h3>
+                <span>progressao por semana ou mes</span>
+              </div>
+            </div>
+            ${databaseGrowthChart(database)}
+          </article>
+
           <article class="ops-panel">
             <div class="ops-panel-head"><h3>Bancos standby</h3></div>
             ${renderDatabaseSummary(database, standbyClient)}
@@ -3248,15 +3259,51 @@ function renderStandbyGuide(client) {
         </div>
         <div class="ops-stack">
           <article class="ops-panel">
-            <div class="ops-panel-head"><h3>CPU / Memoria / Disco standby</h3></div>
+            <div class="ops-panel-head"><h3>CPU / Memoria / Disco</h3></div>
             ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
           </article>
-          <article class="ops-panel">
-            <div class="ops-panel-head"><h3>Rede standby</h3></div>
-            ${networkLineChart(metrics)}
-          </article>
-          ${firebirdMetricsPanel(metrics)}
         </div>
+      </section>
+
+      <section class="ops-grid">
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Rede / Internet</h3>
+              <span>trafego, latencia e perda ate fora da loja</span>
+            </div>
+          </div>
+          ${networkLineChart(metrics)}
+        </article>
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Rede local</h3>
+              <span>gateway, DNS, link e erros da interface</span>
+            </div>
+          </div>
+          ${localNetworkLineChart(metrics)}
+        </article>
+      </section>
+
+      <section class="ops-grid">
+        <div class="temperature-card-wrap ops-panel-wide">${detailTemperaturePanel(standbyClient)}</div>
+      </section>
+
+      <section class="ops-grid">
+        <article class="ops-panel ops-panel-wide firebird-sessions-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Sessoes Firebird</h3>
+              <span>conexoes no banco Firebird do standby</span>
+            </div>
+          </div>
+          ${renderFirebirdSessions(database)}
+        </article>
+      </section>
+
+      <section class="ops-grid">
+        ${firebirdMetricsPanel(metrics)}
       </section>
     </section>
   `;
