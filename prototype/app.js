@@ -1241,6 +1241,18 @@ function standbyDashboardPayload(cluster = {}) {
   }) || null;
 }
 
+function primaryDashboardPayload(cluster = {}) {
+  const candidates = [
+    cluster.primaryDashboard,
+    cluster.peerDashboard,
+    cluster.activeDashboard
+  ].filter(Boolean);
+  return candidates.find((dashboard) => {
+    const role = String(dashboard.cluster?.nodeRole || dashboard.nodeRole || "").toLowerCase();
+    return role === "primary";
+  }) || null;
+}
+
 function standbyNodeInfo(cluster = {}) {
   const dashboard = standbyDashboardPayload(cluster) || {};
   const standbyCluster = dashboard.cluster || {};
@@ -1270,6 +1282,11 @@ function standbyNodeInfo(cluster = {}) {
 function localNodeIsStandbyRole(cluster = {}) {
   const role = String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase();
   return ["standby", "recovery"].includes(role);
+}
+
+function localNodeIsPrimaryRole(cluster = {}) {
+  const role = String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase();
+  return role === "primary";
 }
 
 function haRecoveryInfo(cluster = {}, host = {}) {
@@ -3154,6 +3171,163 @@ function standbyClientView(client) {
   };
 }
 
+function dashboardNodeClientView(client, dashboard, fallback = {}) {
+  const nodeCluster = dashboard?.cluster || fallback.cluster || {};
+  const nodeHost = dashboard?.host || fallback.host || {};
+  const nodeDatabase = dashboard?.database || fallback.database || {};
+  const nodeMetrics = dashboard?.metrics || fallback.metrics || {};
+  const nodeBackups = dashboard?.backups || fallback.backups || {};
+  const version = dashboard?.build?.version
+    || dashboard?.tronsoftos?.version
+    || dashboard?.version
+    || fallback.version
+    || "-";
+  return {
+    ...client,
+    environment: fallback.environment || client.environment,
+    version,
+    database: databaseVersion({ database: nodeDatabase }),
+    databaseInfo: nodeDatabase,
+    host: nodeHost,
+    backups: nodeBackups,
+    metrics: nodeMetrics,
+    services: dashboard?.services || fallback.services || {},
+    cluster: nodeCluster,
+    diskPercent: diskPercent({ backups: nodeBackups, metrics: nodeMetrics, host: nodeHost, database: nodeDatabase }),
+    backup: backupSummary({ backups: nodeBackups }),
+    lastSeenAt: dashboard?.collectedAt || fallback.lastSeenAt || null,
+    lastSeen: formatDateTime(dashboard?.collectedAt || fallback.lastSeenAt)
+  };
+}
+
+function renderHaNodeOperationalCards(nodeClient, options = {}) {
+  const titleSuffix = options.titleSuffix || "";
+  const database = nodeClient.databaseInfo || {};
+  const host = nodeClient.host || {};
+  const backups = nodeClient.backups || {};
+  const metrics = nodeClient.metrics || {};
+  const storage = storageInfo(nodeClient);
+  const disk = gaugeValue(nodeClient.diskPercent);
+  const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
+  const backupDisk = gaugeValue(backups.disk?.percentUsed);
+  const backupDiskTone = backupDisk === null ? "unknown" : backupDisk >= 90 ? "offline" : backupDisk >= 75 ? "warning" : "online";
+  const drive = quotaGaugeValue(backups.quota);
+  const driveTone = backups.quota?.ok === false ? "warning" : drive === null ? "unknown" : drive >= 90 ? "offline" : drive >= 75 ? "warning" : "online";
+  const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
+  const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
+  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"]);
+  const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
+  const cpuCores = host.cpuCores ?? host.processorCount ?? "-";
+  const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
+  const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
+  return `
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Saude do ambiente${escapeHtml(titleSuffix)}</h3>
+            <span>${escapeHtml(host.hostname || "hostname nao informado")} - ${escapeHtml(host.ip || "ip nao informado")}</span>
+          </div>
+          <span class="ops-chip version-chip">${escapeHtml(nodeClient.version)}</span>
+        </div>
+        <div class="gauge-grid">
+          ${detailGauge("Disco servidor", disk, diskTone, "uso geral informado")}
+          ${detailGauge("Disco backup", backupDisk, backupDiskTone, backups.backupDir || "diretorio de backup")}
+          ${detailGauge("Google Drive", drive, driveTone, quotaGaugeCaption(backups.quota, nodeClient.googleDrive || null))}
+        </div>
+      </article>
+    </section>
+
+    <section class="ops-grid ops-detail-main">
+      <div class="ops-stack">
+        <article class="ops-panel">
+          <div class="ops-panel-head"><h3>Servidor</h3></div>
+          <div class="detail-grid compact">
+            ${detailItem("Hostname", host.hostname)}
+            ${detailItem("IP", host.ip)}
+            ${detailItem("Hora servidor", serverTimeCaption(host))}
+            ${detailItem("Sistema", host.os)}
+            ${detailItem("CPU", cpuModel)}
+            ${detailItem("Nucleos", cpuCores)}
+            ${detailItem("Memoria RAM", memoryTotalLabel)}
+            ${detailItem("Uptime", metrics.hostUptimeSeconds ? `${Math.round(Number(metrics.hostUptimeSeconds) / 3600)} h` : "-")}
+          </div>
+        </article>
+
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Crescimento do banco</h3>
+              <span>progressao por semana ou mes</span>
+            </div>
+          </div>
+          ${databaseGrowthChart(database)}
+        </article>
+      </div>
+
+      <div class="ops-stack">
+        <article class="ops-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>CPU / Memoria / Disco</h3>
+              <span>desempenho e armazenamento do servidor</span>
+            </div>
+          </div>
+          ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
+        </article>
+      </div>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Rede / Internet</h3>
+            <span>trafego, latencia e perda ate fora da loja</span>
+          </div>
+        </div>
+        ${networkLineChart(metrics)}
+      </article>
+      <article class="ops-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Rede local</h3>
+            <span>gateway, DNS, link e erros da interface</span>
+          </div>
+        </div>
+        ${localNetworkLineChart(metrics)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      <div class="temperature-card-wrap ops-panel-wide">${detailTemperaturePanel(nodeClient)}</div>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide">
+        <div class="ops-panel-head"><h3>Bancos Firebird</h3></div>
+        ${renderDatabaseSummary(database, nodeClient)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide firebird-sessions-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Sessoes Firebird</h3>
+            <span>sessao, IP, processo, PID e conexoes recentes por banco</span>
+          </div>
+        </div>
+        ${renderFirebirdSessions(database)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
+      ${firebirdMetricsPanel(metrics)}
+    </section>
+  `;
+}
+
 function renderHaOperationalPanel(client) {
   const cluster = client.cluster || {};
   const hasHa = environmentHaStatus(client);
@@ -3255,17 +3429,9 @@ function renderStandbyGuide(client) {
 
   const standbyClient = localStandby ? client : standbyClientView(client);
   const metrics = standbyClient.metrics || {};
-  const database = standbyClient.databaseInfo || {};
-  const host = standbyClient.host || {};
   const storage = storageInfo(standbyClient);
   const disk = gaugeValue(standbyClient.diskPercent);
   const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
-  const cpuSeries = metricSeriesValues(metrics, ["cpuPercent", "cpu", "cpu_percent", "processorPercent"]);
-  const memorySeries = metricSeriesValues(metrics, ["memoryPercent", "memPercent", "memory", "memory_percent", "ramPercent"]);
-  const diskSeries = metricSeriesValues(metrics, ["diskUsedPercent", "diskPercent", "storagePercent", "disk", "disk_percent"]);
-  const cpuModel = host.cpuModel || host.cpuName || host.processorName || "-";
-  const memoryTotal = host.memoryTotalBytes || host.ramTotalBytes || metrics.systemMetrics?.memoryTotalBytes || metrics.systemMetrics?.memory?.totalBytes;
-  const memoryTotalLabel = Number.isFinite(Number(memoryTotal)) ? bytesLabel(Number(memoryTotal)) : "-";
   const standbyCluster = standby.cluster || {};
   return `
     <section class="standby-guide-panel">
@@ -3283,84 +3449,69 @@ function renderStandbyGuide(client) {
         ${detailMetric("Banco", standbyClient.database, "neutral", "versao_banco standby")}
         ${detailMetric("Disco", disk === null ? "--" : `${disk}%`, diskTone, storage.free !== null ? `${bytesLabel(storage.free)} livres` : "armazenamento standby")}
       </section>
-      <section class="ops-grid ops-detail-main">
-        <div class="ops-stack">
-          <article class="ops-panel">
-            <div class="ops-panel-head"><h3>Servidor</h3></div>
-            <div class="detail-grid compact">
-              ${detailItem("Hostname", host.hostname)}
-              ${detailItem("IP", host.ip)}
-              ${detailItem("Sistema", host.os)}
-              ${detailItem("CPU", cpuModel)}
-              ${detailItem("Nucleos", host.cpuCores ?? host.processorCount ?? "-")}
-              ${detailItem("Memoria RAM", memoryTotalLabel)}
-              ${detailItem("Uptime", metrics.hostUptimeSeconds ? `${Math.round(Number(metrics.hostUptimeSeconds) / 3600)} h` : "-")}
-            </div>
-          </article>
+      ${renderHaNodeOperationalCards(standbyClient)}
+    </section>
+  `;
+}
 
-          <article class="ops-panel">
-            <div class="ops-panel-head">
-              <div>
-                <h3>Crescimento do banco</h3>
-                <span>progressao por semana ou mes</span>
-              </div>
+function renderPrimaryGuide(client) {
+  const cluster = client.cluster || {};
+  if (!environmentHaStatus(client)) return "";
+  const localPrimary = localNodeIsPrimaryRole(cluster);
+  const primaryDashboard = localPrimary ? null : primaryDashboardPayload(cluster);
+  const primaryHealth = String(cluster.standbyHealth?.node?.nodeRole || "").toLowerCase() === "primary" ? cluster.standbyHealth : null;
+  const primaryClient = localPrimary
+    ? client
+    : primaryDashboard
+      ? dashboardNodeClientView(client, primaryDashboard, { environment: "Primary HA" })
+      : null;
+  const primaryName = localPrimary
+    ? haNodeName(cluster, client.host)
+    : primaryDashboard?.cluster?.nodeName || primaryHealth?.node?.nodeName || haActiveNodeName(cluster, client.host) || "-";
+  if (!primaryClient) {
+    return `
+      <section class="ops-grid">
+        <article class="ops-panel ops-panel-wide standby-guide-panel">
+          <div class="ops-panel-head">
+            <div>
+              <h3>Guia Primary HA</h3>
+              <span>parametros do no primary</span>
             </div>
-            ${databaseGrowthChart(database)}
-          </article>
-
-          <article class="ops-panel">
-            <div class="ops-panel-head"><h3>Bancos standby</h3></div>
-            ${renderDatabaseSummary(database, standbyClient)}
-          </article>
+            <span class="ops-chip warning">aguardando metricas</span>
+          </div>
+          <div class="detail-grid compact">
+            ${detailItem("Host primary", primaryName)}
+            ${detailItem("Papel", primaryHealth?.node?.nodeRole || "Primary")}
+            ${detailItem("URL", primaryDashboard?.url || primaryHealth?.url || "-")}
+            ${detailItem("Erro", primaryDashboard?.error || "-")}
+          </div>
+          <p class="empty-note">O TronSystem precisa enviar primaryDashboard ou peerDashboard no heartbeat para a Central exibir CPU, memoria, temperatura, rede e banco do primary.</p>
+        </article>
+      </section>
+    `;
+  }
+  const metrics = primaryClient.metrics || {};
+  const storage = storageInfo(primaryClient);
+  const disk = gaugeValue(primaryClient.diskPercent);
+  const diskTone = disk === null ? "unknown" : disk >= 90 ? "offline" : disk >= 75 ? "warning" : "online";
+  const primaryCluster = primaryDashboard?.cluster || cluster;
+  return `
+    <section class="standby-guide-panel">
+      <div class="standby-guide-head">
+        <div>
+          <span class="ops-eyebrow">Guia HA</span>
+          <h3>Primary</h3>
+          <p>${escapeHtml(primaryName)} - ${escapeHtml(haNodeRoleLabel(primaryCluster.nodeRole || "primary"))}</p>
         </div>
-        <div class="ops-stack">
-          <article class="ops-panel">
-            <div class="ops-panel-head"><h3>CPU / Memoria / Disco</h3></div>
-            ${performanceLineChart(cpuSeries, memorySeries, diskSeries, storage)}
-          </article>
-        </div>
+        <span class="ops-chip online">com leitura</span>
+      </div>
+      <section class="ops-metrics compact-metrics">
+        ${detailMetric("Heartbeat primary", primaryClient.lastSeenAt ? formatRelativeTime(primaryClient.lastSeenAt) : "-", "online", primaryClient.lastSeen)}
+        ${detailMetric("Papel", haNodeRoleLabel(primaryCluster.nodeRole || "primary"), "neutral", primaryCluster.activeNode ? `ativo ${primaryCluster.activeNode}` : "no primary")}
+        ${detailMetric("Banco", primaryClient.database, "neutral", "versao_banco primary")}
+        ${detailMetric("Disco", disk === null ? "--" : `${disk}%`, diskTone, storage.free !== null ? `${bytesLabel(storage.free)} livres` : "armazenamento primary")}
       </section>
-
-      <section class="ops-grid">
-        <article class="ops-panel">
-          <div class="ops-panel-head">
-            <div>
-              <h3>Rede / Internet</h3>
-              <span>trafego, latencia e perda ate fora da loja</span>
-            </div>
-          </div>
-          ${networkLineChart(metrics)}
-        </article>
-        <article class="ops-panel">
-          <div class="ops-panel-head">
-            <div>
-              <h3>Rede local</h3>
-              <span>gateway, DNS, link e erros da interface</span>
-            </div>
-          </div>
-          ${localNetworkLineChart(metrics)}
-        </article>
-      </section>
-
-      <section class="ops-grid">
-        <div class="temperature-card-wrap ops-panel-wide">${detailTemperaturePanel(standbyClient)}</div>
-      </section>
-
-      <section class="ops-grid">
-        <article class="ops-panel ops-panel-wide firebird-sessions-panel">
-          <div class="ops-panel-head">
-            <div>
-              <h3>Sessoes Firebird</h3>
-              <span>conexoes no banco Firebird do standby</span>
-            </div>
-          </div>
-          ${renderFirebirdSessions(database)}
-        </article>
-      </section>
-
-      <section class="ops-grid">
-        ${firebirdMetricsPanel(metrics)}
-      </section>
+      ${renderHaNodeOperationalCards(primaryClient)}
     </section>
   `;
 }
@@ -3468,6 +3619,8 @@ function renderClientDetail(client) {
     ${renderHaNodeTabs(client, activeHaNodeTab)}
 
     <section class="ha-node-panel" data-ha-node-panel="primary" ${hasHa && activeHaNodeTab !== "primary" ? "hidden" : ""}>
+    ${hasHa ? renderPrimaryGuide(client) : ""}
+    <div ${hasHa ? "hidden" : ""}>
 
     <section class="ops-grid">
       <article class="ops-panel ops-panel-wide">
@@ -3634,6 +3787,7 @@ function renderClientDetail(client) {
       <div class="ops-panel-head"><h3>Alertas e eventos</h3></div>
       <div class="detail-list alerts-detail">${renderClientAlerts(client)}</div>
     </section>
+    </div>
     </section>
 
     ${hasHa ? `<section class="ha-node-panel" data-ha-node-panel="standby" ${activeHaNodeTab !== "standby" ? "hidden" : ""}>${renderStandbyGuide(client)}</section>` : ""}
