@@ -681,16 +681,26 @@ async function loadCentralData() {
 function updateRefreshLabel() {
   const label = document.querySelector("#last-refresh-label");
   if (!label) return;
+  label.classList.remove("stale", "failed");
+  if (lastDataRefreshAt) {
+    const ageMs = Date.now() - lastDataRefreshAt.getTime();
+    if (ageMs > dashboardRefreshIntervalMs * 3) label.classList.add("stale");
+  }
   label.textContent = lastDataRefreshAt
     ? `Ultima atualizacao ${formatRelativeTime(lastDataRefreshAt.toISOString())}`
     : "Aguardando atualizacao";
+}
+
+function refreshCentralDataSoon() {
+  if (!currentUser || !can(permissions.viewMonitor)) return;
+  loadCentralData().catch(showError);
 }
 
 function startDashboardAutoRefresh() {
   if (dashboardRefreshTimer) clearInterval(dashboardRefreshTimer);
   if (refreshLabelTimer) clearInterval(refreshLabelTimer);
   dashboardRefreshTimer = setInterval(() => {
-    if (currentUser && can(permissions.viewMonitor)) loadCentralData().catch(showError);
+    refreshCentralDataSoon();
   }, dashboardRefreshIntervalMs);
   refreshLabelTimer = setInterval(updateRefreshLabel, 30_000);
 }
@@ -1313,6 +1323,16 @@ function attachHaNodeTabs(client) {
       renderClientDetail(client);
     });
   });
+}
+
+function showError(error) {
+  const label = document.querySelector("#last-refresh-label");
+  const message = error?.message || "falha ao atualizar";
+  if (label) {
+    label.classList.add("failed");
+    label.textContent = `Falha na atualizacao: ${message}`;
+  }
+  console.error(error);
 }
 
 function renderClients(filter = "") {
@@ -4443,7 +4463,7 @@ async function createReseller(event) {
 
 document.querySelector("#login-form").addEventListener("submit", login);
 document.querySelector("#logout-button").addEventListener("click", logout);
-document.querySelector("#refresh-button").addEventListener("click", loadCentralData);
+document.querySelector("#refresh-button").addEventListener("click", refreshCentralDataSoon);
 document.querySelector("#theme-toggle-button").addEventListener("click", toggleTheme);
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -4513,6 +4533,10 @@ document.querySelector("#maintenance-backup-button").addEventListener("click", r
 document.querySelector("#maintenance-backup-refresh-button").addEventListener("click", loadBackupStatus);
 document.querySelector("#maintenance-backup-download-button").addEventListener("click", downloadLatestBackup);
 document.querySelector("#sidebar-toggle-button").addEventListener("click", toggleSidebar);
+window.addEventListener("focus", refreshCentralDataSoon);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshCentralDataSoon();
+});
 
 document.querySelector("#refresh-button").innerHTML = iconRefresh();
 document.querySelector("#logout-button").innerHTML = iconLogout();

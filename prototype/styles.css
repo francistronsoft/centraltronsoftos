@@ -108,6 +108,14 @@ body {
   white-space: nowrap;
 }
 
+.refresh-label.stale {
+  color: #b36b00;
+}
+
+.refresh-label.failed {
+  color: var(--danger);
+}
+
 button,
 input {
   font: inherit;
