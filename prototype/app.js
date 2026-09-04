@@ -1219,11 +1219,16 @@ function haActiveNodeName(cluster = {}, host = {}) {
 }
 
 function standbyDashboardPayload(cluster = {}) {
-  return cluster.standbyDashboard
-    || cluster.standby?.dashboard
-    || cluster.peerDashboard
-    || cluster.sync?.standbyDashboard
-    || null;
+  const candidates = [
+    cluster.standbyDashboard,
+    cluster.standby?.dashboard,
+    cluster.sync?.standbyDashboard,
+    cluster.peerDashboard
+  ].filter(Boolean);
+  return candidates.find((dashboard) => {
+    const role = String(dashboard.cluster?.nodeRole || dashboard.nodeRole || "").toLowerCase();
+    return ["standby", "recovery"].includes(role);
+  }) || candidates[0] || null;
 }
 
 function standbyNodeInfo(cluster = {}) {
@@ -1251,6 +1256,11 @@ function standbyNodeInfo(cluster = {}) {
   };
 }
 
+function localNodeIsStandbyRole(cluster = {}) {
+  const role = String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase();
+  return ["standby", "recovery"].includes(role);
+}
+
 function haRecoveryInfo(cluster = {}, host = {}) {
   const localRole = String(cluster.nodeRole || cluster.identity?.nodeRole || "").toLowerCase();
   if (localRole === "recovery" || cluster.recoveryActive === true) {
@@ -1275,10 +1285,13 @@ function haEnvironmentLabel(client) {
 function renderHaNodeTabs(client, activeTab = "primary") {
   if (!environmentHaStatus(client)) return "";
   const cluster = client.installation?.cluster || client.cluster || {};
-  const standby = standbyNodeInfo(cluster);
+  const standby = localNodeIsStandbyRole(cluster)
+    ? { name: haNodeName(cluster, client.host), role: cluster.nodeRole || cluster.identity?.nodeRole || "standby" }
+    : standbyNodeInfo(cluster);
   const activeNode = haActiveNodeName(cluster, client.host);
   const primaryCaption = activeNode || haNodeName(cluster, client.host);
   const standbyCaption = standby.name && standby.name !== "-" ? standby.name : "aguardando leitura";
+  const standbyLabel = String(standby.role || "").toLowerCase() === "recovery" ? "Standby / Recovery" : "Standby";
   return `
     <section class="ha-node-tabs" aria-label="Nos do ambiente HA">
       <button class="ha-node-tab ${activeTab === "primary" ? "active" : ""}" type="button" data-ha-node-tab="primary">
@@ -1286,7 +1299,7 @@ function renderHaNodeTabs(client, activeTab = "primary") {
         <small>${escapeHtml(primaryCaption || "-")}</small>
       </button>
       <button class="ha-node-tab ${activeTab === "standby" ? "active" : ""}" type="button" data-ha-node-tab="standby">
-        <span>Standby</span>
+        <span>${escapeHtml(standbyLabel)}</span>
         <small>${escapeHtml(standbyCaption)}</small>
       </button>
     </section>
@@ -3172,8 +3185,30 @@ function renderHaOperationalPanel(client) {
 function renderStandbyGuide(client) {
   const cluster = client.cluster || {};
   if (!environmentHaStatus(client)) return "";
-  const standby = standbyDashboardPayload(cluster);
-  const standbyInfo = standbyNodeInfo(cluster);
+  const localStandby = localNodeIsStandbyRole(cluster);
+  const standby = localStandby
+    ? {
+        ok: true,
+        collectedAt: client.lastSeenAt,
+        build: client.installation?.tronsoftos || {},
+        host: client.host || {},
+        database: client.databaseInfo || {},
+        metrics: client.metrics || {},
+        services: client.services || {},
+        backups: client.backups || {},
+        cluster
+      }
+    : standbyDashboardPayload(cluster);
+  const standbyInfo = localStandby
+    ? {
+        dashboard: standby,
+        name: haNodeName(cluster, client.host),
+        role: cluster.nodeRole || cluster.identity?.nodeRole || "standby",
+        ok: true,
+        error: "",
+        url: client.host?.ip || ""
+      }
+    : standbyNodeInfo(cluster);
   if (!standby) {
     return `
       <section class="ops-grid">
@@ -3197,7 +3232,7 @@ function renderStandbyGuide(client) {
     `;
   }
 
-  const standbyClient = standbyClientView(client);
+  const standbyClient = localStandby ? client : standbyClientView(client);
   const metrics = standbyClient.metrics || {};
   const database = standbyClient.databaseInfo || {};
   const host = standbyClient.host || {};
