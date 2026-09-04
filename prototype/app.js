@@ -1238,25 +1238,26 @@ function standbyDashboardPayload(cluster = {}) {
   return candidates.find((dashboard) => {
     const role = String(dashboard.cluster?.nodeRole || dashboard.nodeRole || "").toLowerCase();
     return ["standby", "recovery"].includes(role);
-  }) || candidates[0] || null;
+  }) || null;
 }
 
 function standbyNodeInfo(cluster = {}) {
   const dashboard = standbyDashboardPayload(cluster) || {};
   const standbyCluster = dashboard.cluster || {};
   const healthNode = cluster.standbyHealth?.node || {};
+  const healthRole = String(healthNode.nodeRole || "").toLowerCase();
+  const healthLooksLikeStandby = ["standby", "recovery"].includes(healthRole);
   const tronfireStandby = cluster.sync?.tronfireStandby || {};
   const host = dashboard.host || {};
   return {
     dashboard,
     name: standbyCluster.nodeName
-      || healthNode.nodeName
+      || (healthLooksLikeStandby ? healthNode.nodeName : "")
       || dashboard.nodeName
       || host.hostname
-      || cluster.sync?.standbyHost
       || "-",
     role: standbyCluster.nodeRole
-      || healthNode.nodeRole
+      || (healthLooksLikeStandby ? healthNode.nodeRole : "")
       || tronfireStandby.nodeRole
       || dashboard.nodeRole
       || "",
