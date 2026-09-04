@@ -935,6 +935,47 @@ p {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
+.ha-node-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 2px 0 4px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.ha-node-tab {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 10px 14px 12px;
+  color: var(--ops-muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ha-node-tab span {
+  color: var(--ops-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ha-node-tab small {
+  overflow-wrap: anywhere;
+}
+
+.ha-node-tab.active {
+  border-bottom-color: #1897cf;
+  color: var(--ops-text);
+}
+
+.ha-node-panel {
+  display: grid;
+  gap: 18px;
+}
+
 .standby-guide-panel {
   display: grid;
   gap: 18px;

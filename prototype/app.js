@@ -29,6 +29,7 @@ let geoLeafletMap = null;
 let geoLeafletLayer = null;
 let selectedClientId = "";
 let firebirdSessionFilter = "active";
+let clientHaNodeTab = "primary";
 let previousDetailView = "clients";
 let lastDataRefreshAt = null;
 let dashboardRefreshTimer = null;
@@ -1269,6 +1270,36 @@ function haEnvironmentLabel(client) {
   const recovery = haRecoveryInfo(cluster, client.host);
   if (recovery.active) return `Recovery: ${recovery.node}`;
   return activeNode ? `Ativo: ${activeNode}` : "HA ativo";
+}
+
+function renderHaNodeTabs(client, activeTab = "primary") {
+  if (!environmentHaStatus(client)) return "";
+  const cluster = client.installation?.cluster || client.cluster || {};
+  const standby = standbyNodeInfo(cluster);
+  const activeNode = haActiveNodeName(cluster, client.host);
+  const primaryCaption = activeNode || haNodeName(cluster, client.host);
+  const standbyCaption = standby.name && standby.name !== "-" ? standby.name : "aguardando leitura";
+  return `
+    <section class="ha-node-tabs" aria-label="Nos do ambiente HA">
+      <button class="ha-node-tab ${activeTab === "primary" ? "active" : ""}" type="button" data-ha-node-tab="primary">
+        <span>Primary</span>
+        <small>${escapeHtml(primaryCaption || "-")}</small>
+      </button>
+      <button class="ha-node-tab ${activeTab === "standby" ? "active" : ""}" type="button" data-ha-node-tab="standby">
+        <span>Standby</span>
+        <small>${escapeHtml(standbyCaption)}</small>
+      </button>
+    </section>
+  `;
+}
+
+function attachHaNodeTabs(client) {
+  document.querySelectorAll("[data-ha-node-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clientHaNodeTab = button.dataset.haNodeTab || "primary";
+      renderClientDetail(client);
+    });
+  });
 }
 
 function renderClients(filter = "") {
@@ -3303,6 +3334,7 @@ function renderClientDetail(client) {
   const hasHa = supportsHa && environmentHaStatus(client);
   const activeNode = hasHa ? haActiveNodeName(cluster, host) : "";
   const recovery = hasHa ? haRecoveryInfo(cluster, host) : { active: false, node: "-", detail: "" };
+  const activeHaNodeTab = hasHa && clientHaNodeTab === "standby" ? "standby" : "primary";
 
   document.querySelector("#client-detail-title").textContent = client.name;
   document.querySelector("#client-detail-subtitle").textContent = `${client.reseller} - ${location}`;
@@ -3329,6 +3361,10 @@ function renderClientDetail(client) {
     </section>
 
     ${renderHaOperationalPanel(client)}
+
+    ${renderHaNodeTabs(client, activeHaNodeTab)}
+
+    <section class="ha-node-panel" data-ha-node-panel="primary" ${hasHa && activeHaNodeTab !== "primary" ? "hidden" : ""}>
 
     <section class="ops-grid">
       <article class="ops-panel ops-panel-wide">
@@ -3495,9 +3531,11 @@ function renderClientDetail(client) {
       <div class="ops-panel-head"><h3>Alertas e eventos</h3></div>
       <div class="detail-list alerts-detail">${renderClientAlerts(client)}</div>
     </section>
+    </section>
 
-    ${renderStandbyGuide(client)}
+    ${hasHa ? `<section class="ha-node-panel" data-ha-node-panel="standby" ${activeHaNodeTab !== "standby" ? "hidden" : ""}>${renderStandbyGuide(client)}</section>` : ""}
   `;
+  attachHaNodeTabs(client);
 }
 
 function openClientDetail(clientId, fromView = activeView) {
