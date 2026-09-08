@@ -84,6 +84,9 @@ function compactDatabase(database = {}) {
   if (Array.isArray(next.firebirdSessions)) {
     next.firebirdSessions = next.firebirdSessions.slice(0, 50);
   }
+  if (Array.isArray(next.databases)) {
+    next.databases = next.databases.map((item) => compactDatabase(item));
+  }
   if (next.indexHealth && typeof next.indexHealth === "object") {
     const health = next.indexHealth;
     next.indexHealth = {

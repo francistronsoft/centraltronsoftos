@@ -1658,6 +1658,30 @@ function databaseAlertTitle(database = {}) {
   return alias && alias !== name ? `Banco ${alias} com problema` : `${name} com problema`;
 }
 
+function databaseAlertDetails(database = {}) {
+  const transactionHealth = database.transactionHealth || database.indexHealth?.transactionHealth || null;
+  const transactionGap = database.transactionGap || database.indexHealth?.transactionGap || null;
+  return {
+    kind: "database",
+    databaseAlias: database.databaseAlias || database.alias || database.id || "",
+    databaseName: database.databaseName || database.name || "",
+    engine: database.engine || "Firebird",
+    pathRole: database.pathRole || "",
+    transactionHealth,
+    transactionGap,
+    oldestTransaction: transactionHealth?.oldestTransaction ?? database.oldestTransaction ?? database.indexHealth?.oldestTransaction ?? null,
+    oldestActive: transactionHealth?.oldestActive ?? database.oldestActive ?? database.indexHealth?.oldestActive ?? null,
+    oldestSnapshot: transactionHealth?.oldestSnapshot ?? database.oldestSnapshot ?? database.indexHealth?.oldestSnapshot ?? null,
+    nextTransaction: transactionHealth?.nextTransaction ?? database.nextTransaction ?? database.indexHealth?.nextTransaction ?? null,
+    sweepInterval: transactionHealth?.sweepInterval ?? database.sweepInterval ?? database.indexHealth?.sweepInterval ?? null,
+    gap: transactionGap?.gap ?? database.gap ?? database.indexHealth?.transactionGap?.gap ?? null,
+    activeGap: transactionGap?.activeGap ?? database.activeGap ?? database.indexHealth?.transactionGap?.activeGap ?? null,
+    snapshotGap: transactionGap?.snapshotGap ?? database.snapshotGap ?? database.indexHealth?.transactionGap?.snapshotGap ?? null,
+    warningThreshold: transactionGap?.warningThreshold ?? database.warningThreshold ?? database.indexHealth?.transactionGap?.warningThreshold ?? null,
+    criticalThreshold: transactionGap?.criticalThreshold ?? database.criticalThreshold ?? database.indexHealth?.transactionGap?.criticalThreshold ?? null
+  };
+}
+
 function syncDatabaseHealthAlerts(db, installation) {
   const databases = Array.isArray(installation.database?.databases) && installation.database.databases.length
     ? installation.database.databases
@@ -1670,12 +1694,7 @@ function syncDatabaseHealthAlerts(db, installation) {
     if (!problem) return;
     activeCodes.add(code);
     const existing = db.alerts.find((alert) => alert.installationId === installation.installationId && alert.status === "open" && alert.code === code);
-    const details = {
-      kind: "database",
-      databaseAlias: database.databaseAlias || database.alias || database.id || "",
-      databaseName: database.databaseName || database.name || "",
-      engine: database.engine || "Firebird"
-    };
+    const details = databaseAlertDetails(database);
     if (existing) {
       existing.title = databaseAlertTitle(database);
       existing.message = problem;
