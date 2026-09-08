@@ -1200,6 +1200,11 @@ function attachTokenCopyButtons(root) {
 function environmentHaStatus(client) {
   const cluster = client.installation?.cluster || client.cluster || {};
   const mode = String(cluster.mode || cluster.status?.mode || "").toLowerCase();
+  const explicitlySimple = ["simple", "standalone", "single", "solo", "none", "disabled"].includes(mode)
+    || cluster.enabled === false
+    || cluster.haEnabled === false
+    || cluster.keepalived?.enabled === false;
+  if (explicitlySimple) return false;
   const enabled = cluster.enabled === true || cluster.haEnabled === true || cluster.keepalived?.enabled === true;
   const hasStandby = Boolean(cluster.standby || cluster.peer || cluster.nodes?.length > 1);
   const hasHaState = Boolean(cluster.sync?.standbyHost || cluster.standbyHealth || cluster.standbyDashboard || cluster.vip || cluster.activeNode || cluster.lock?.active_node);
