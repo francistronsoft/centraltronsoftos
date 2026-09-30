@@ -2195,6 +2195,47 @@ tr.clickable-row:hover,
   border-left-color: #e1a23a;
 }
 
+.firebird-session-summary {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  cursor: pointer;
+  list-style: none;
+}
+
+.firebird-session-summary::-webkit-details-marker {
+  display: none;
+}
+
+.firebird-session-summary:focus-visible {
+  outline: 2px solid var(--ops-text);
+  outline-offset: 2px;
+}
+
+.firebird-session-expand {
+  width: 20px;
+  text-align: center;
+}
+
+.firebird-session-equipment[open] .firebird-session-expand {
+  transform: rotate(90deg);
+}
+
+.firebird-session-details {
+  padding: 0 12px;
+}
+
+.firebird-session-detail {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ops-line);
+  overflow-wrap: anywhere;
+}
+
+.firebird-session-detail span {
+  color: var(--ops-muted);
+  font-size: 12px;
+}
+
 .firebird-session-row.offline {
   border-left-color: #ef6b6b;
 }
