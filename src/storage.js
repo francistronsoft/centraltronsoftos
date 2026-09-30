@@ -1,9 +1,12 @@
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const dataDir = join(rootDir, "data");
+const dataDir = resolve(process.env.CENTRAL_DATA_DIR || join(rootDir, "data"));
 const dataFile = join(dataDir, "central-db.json");
 
 const emptyDb = {
@@ -30,6 +33,8 @@ const maxBackupFiles = Number(process.env.CENTRAL_MAX_BACKUP_FILES || 20);
 
 let pgPool = null;
 let pgReady = false;
+let fileMutationTail = Promise.resolve();
+const mutationStorage = new AsyncLocalStorage();
 
 function usePostgres() {
   return Boolean(process.env.DATABASE_URL);
@@ -155,6 +160,10 @@ function compactDb(db) {
   return next;
 }
 
+function persistedDb(db) {
+  return JSON.parse(JSON.stringify(compactDb(db)));
+}
+
 async function postgresPool() {
   if (pgPool) return pgPool;
   const { Pool } = await import("pg");
@@ -169,9 +178,11 @@ async function ensurePostgresDb() {
     create table if not exists central_state (
       id integer primary key,
       data jsonb not null,
+      version bigint not null default 0,
       updated_at timestamptz not null default now()
     )
   `);
+  await pool.query("alter table central_state add column if not exists version bigint not null default 0");
   await pool.query(
     `insert into central_state (id, data)
      values (1, $1::jsonb)
@@ -186,17 +197,6 @@ async function readPostgresDb() {
   const pool = await postgresPool();
   const result = await pool.query("select data from central_state where id = 1");
   return compactDb(result.rows[0]?.data);
-}
-
-async function writePostgresDb(db) {
-  await ensurePostgresDb();
-  const pool = await postgresPool();
-  await pool.query(
-    `insert into central_state (id, data, updated_at)
-     values (1, $1::jsonb, now())
-     on conflict (id) do update set data = excluded.data, updated_at = now()`,
-    [JSON.stringify(compactDb(db))]
-  );
 }
 
 async function ensureFileDb() {
@@ -217,15 +217,148 @@ async function readFileDb() {
 
 async function writeFileDb(db) {
   await mkdir(dataDir, { recursive: true });
-  await writeFile(dataFile, `${JSON.stringify(compactDb(db), null, 2)}\n`, "utf8");
+  const temporaryFile = `${dataFile}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryFile, `${JSON.stringify(compactDb(db), null, 2)}\n`, "utf8");
+  await rename(temporaryFile, dataFile);
 }
 
 export async function readDb() {
+  const mutation = mutationStorage.getStore();
+  if (mutation) {
+    if (!mutation.db) await mutation.initialize();
+    return mutation.db;
+  }
   return usePostgres() ? readPostgresDb() : readFileDb();
 }
 
 export async function writeDb(db) {
-  return usePostgres() ? writePostgresDb(db) : writeFileDb(db);
+  const mutation = mutationStorage.getStore();
+  if (mutation) {
+    if (mutation.committed) {
+      throw new Error(`A operacao ${mutation.operation} tentou persistir o estado mais de uma vez.`);
+    }
+    const persisted = persistedDb(db);
+    const serialized = JSON.stringify(persisted);
+    if (mutation.driver === "postgres") {
+      const update = await mutation.client.query(
+        `update central_state
+         set data = $1::jsonb, version = version + 1, updated_at = now()
+         where id = 1
+         returning version`,
+        [serialized]
+      );
+      if (update.rowCount !== 1) {
+        throw new Error(`A linha de estado nao foi encontrada durante a operacao ${mutation.operation}.`);
+      }
+      const committedVersion = Number(update.rows[0]?.version);
+      await mutation.client.query("commit");
+      mutation.committed = true;
+      const confirmation = await mutation.client.query("select data, version from central_state where id = 1");
+      const confirmedVersion = Number(confirmation.rows[0]?.version);
+      if (!Number.isFinite(committedVersion) || confirmedVersion < committedVersion) {
+        throw new Error(`Falha ao confirmar a persistencia da operacao ${mutation.operation}.`);
+      }
+      mutation.db = compactDb(confirmation.rows[0]?.data);
+      if (confirmedVersion === committedVersion && !isDeepStrictEqual(persistedDb(mutation.db), persisted)) {
+        throw new Error(`O estado confirmado diverge da operacao ${mutation.operation}.`);
+      }
+      return;
+    }
+    await writeFileDb(persisted);
+    mutation.committed = true;
+    mutation.db = await readFileDb();
+    if (!isDeepStrictEqual(persistedDb(mutation.db), persisted)) {
+      throw new Error(`O estado confirmado diverge da operacao ${mutation.operation}.`);
+    }
+    return;
+  }
+  throw new Error("writeDb exige um contexto criado por runDbMutation.");
+}
+
+function mutationLog(level, mutation, error = null) {
+  const record = {
+    level,
+    event: "central_state_mutation",
+    operation: mutation.operation,
+    operationId: mutation.operationId,
+    driver: mutation.driver,
+    committed: mutation.committed,
+    ...(error ? { error: String(error.message || error) } : {})
+  };
+  const output = JSON.stringify(record);
+  if (level === "error") console.error(output);
+  else console.warn(output);
+}
+
+async function runPostgresMutation(operation, callback) {
+  await ensurePostgresDb();
+  const pool = await postgresPool();
+  const client = await pool.connect();
+  const mutation = {
+    operation,
+    operationId: randomUUID(),
+    driver: "postgres",
+    client,
+    db: null,
+    committed: false,
+    started: false,
+    async initialize() {
+      if (this.started) return;
+      await client.query("begin");
+      const result = await client.query("select data from central_state where id = 1 for update");
+      this.db = compactDb(result.rows[0]?.data);
+      this.started = true;
+    }
+  };
+  try {
+    const value = await mutationStorage.run(mutation, callback);
+    if (mutation.started && !mutation.committed) await client.query("rollback");
+    return value;
+  } catch (error) {
+    if (mutation.started && !mutation.committed) await client.query("rollback").catch(() => {});
+    mutationLog("error", mutation, error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function runFileMutation(operation, callback) {
+  const previous = fileMutationTail;
+  let release;
+  fileMutationTail = new Promise((resolveTail) => {
+    release = resolveTail;
+  });
+  await previous.catch(() => {});
+  const mutation = {
+    operation,
+    operationId: randomUUID(),
+    driver: "json",
+    db: null,
+    committed: false,
+    async initialize() {
+      if (!this.db) this.db = await readFileDb();
+    }
+  };
+  try {
+    return await mutationStorage.run(mutation, callback);
+  } catch (error) {
+    mutationLog("error", mutation, error);
+    throw error;
+  } finally {
+    release();
+  }
+}
+
+export async function runDbMutation(operation, callback) {
+  if (mutationStorage.getStore()) return callback();
+  return usePostgres()
+    ? runPostgresMutation(operation, callback)
+    : runFileMutation(operation, callback);
+}
+
+export function dbMutationActive() {
+  return Boolean(mutationStorage.getStore());
 }
 
 export function storageInfo() {

@@ -1,12 +1,14 @@
 {
   "name": "central-tronsoftos",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Central de monitoramento para clientes TronSoftOS.",
   "type": "module",
   "scripts": {
     "dev": "node src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/storage.js",
+    "test": "node --test src/*.test.js"
   },
   "dependencies": {
     "pg": "^8.16.3"

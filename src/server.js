@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { basename, extname, join, normalize, resolve } from "node:path";
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { readDb, storageInfo, writeDb } from "./storage.js";
+import { dbMutationActive, readDb, runDbMutation, storageInfo, writeDb } from "./storage.js";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const prototypeDir = join(rootDir, "prototype");
@@ -659,7 +659,14 @@ async function readDbWithBootstrap() {
   db.sessions = db.sessions.filter((session) => new Date(session.expiresAt).getTime() > now);
   db.oauthStates = db.oauthStates.filter((state) => state.status !== "pending" || new Date(state.expiresAt).getTime() > now);
   if (bootstrapUsers(db)) {
-    await writeDb(db);
+    if (dbMutationActive()) return db;
+    return runDbMutation("bootstrap-users", async () => {
+      const current = await readDb();
+      current.sessions = current.sessions.filter((session) => new Date(session.expiresAt).getTime() > now);
+      current.oauthStates = current.oauthStates.filter((state) => state.status !== "pending" || new Date(state.expiresAt).getTime() > now);
+      if (bootstrapUsers(current)) await writeDb(current);
+      return current;
+    });
   }
   return db;
 }
@@ -2384,8 +2391,8 @@ async function handleOAuthCallback(request, response, url) {
   const error = url.searchParams.get("error");
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
-  const db = await readDb();
-  const oauthState = db.oauthStates.find((item) => item.state === state && item.provider === "google");
+  const snapshot = await readDb();
+  const oauthState = snapshot.oauthStates.find((item) => item.state === state && item.provider === "google");
 
   if (error) {
     throw httpError(400, `Google recusou autorizacao: ${error}`);
@@ -2399,58 +2406,70 @@ async function handleOAuthCallback(request, response, url) {
 
   const tokenPayload = await exchangeGoogleCode(requireGoogleOAuthConfig(request), code);
   const userInfo = await fetchGoogleUserInfo(tokenPayload.access_token);
-  const installation = db.installations.find((item) => item.installationId === oauthState.installationId);
-  if (!installation) {
-    throw httpError(404, "Instalacao TronSoftOS nao encontrada.");
-  }
-  const existing = latestOAuthCredential(db, installation);
-  const credential = existing || {
-    id: randomUUID(),
-    provider: "google",
-    purpose: "database_backup_drive",
-    installationId: installation.installationId,
-    clientId: installation.clientId,
-    createdAt: nowIso()
-  };
+  await runDbMutation("oauth-google-callback", async () => {
+    const db = await readDb();
+    const currentState = db.oauthStates.find((item) => item.state === state && item.provider === "google");
+    if (!currentState || currentState.status !== "pending" || new Date(currentState.expiresAt).getTime() < Date.now()) {
+      throw httpError(409, "Solicitacao 0auth ja concluida, revogada ou expirada.");
+    }
+    const installation = db.installations.find((item) => item.installationId === currentState.installationId);
+    if (!installation) throw httpError(404, "Instalacao TronSoftOS nao encontrada.");
+    const existing = latestOAuthCredential(db, installation);
+    const credential = existing || {
+      id: randomUUID(),
+      provider: "google",
+      purpose: "database_backup_drive",
+      installationId: installation.installationId,
+      clientId: installation.clientId,
+      createdAt: nowIso()
+    };
 
-  credential.status = "connected";
-  credential.accountEmail = userInfo.email || "";
-  credential.scopes = String(tokenPayload.scope || googleDriveScope).split(/\s+/).filter(Boolean);
-  credential.accessToken = tokenPayload.access_token;
-  credential.refreshToken = tokenPayload.refresh_token || credential.refreshToken;
-  credential.tokenType = tokenPayload.token_type || "Bearer";
-  credential.remote = oauthState.remote || credential.remote || "gdrive";
-  credential.path = oauthState.path || credential.path || "tronsoftos/backups";
-  credential.expiresAt = new Date(Date.now() + Number(tokenPayload.expires_in || 3600) * 1000).toISOString();
-  credential.connectedAt = credential.connectedAt || nowIso();
-  credential.updatedAt = nowIso();
+    credential.status = "connected";
+    credential.accountEmail = userInfo.email || "";
+    credential.scopes = String(tokenPayload.scope || googleDriveScope).split(/\s+/).filter(Boolean);
+    credential.accessToken = tokenPayload.access_token;
+    credential.refreshToken = tokenPayload.refresh_token || credential.refreshToken;
+    credential.tokenType = tokenPayload.token_type || "Bearer";
+    credential.remote = currentState.remote || credential.remote || "gdrive";
+    credential.path = currentState.path || credential.path || "tronsoftos/backups";
+    credential.expiresAt = new Date(Date.now() + Number(tokenPayload.expires_in || 3600) * 1000).toISOString();
+    credential.connectedAt = credential.connectedAt || nowIso();
+    credential.updatedAt = nowIso();
 
-  if (!existing) db.oauthCredentials.push(credential);
-  oauthState.status = "completed";
-  oauthState.completedAt = nowIso();
-  db.oauthEvents.push({ id: randomUUID(), type: "google_connected", installationId: installation.installationId, accountEmail: credential.accountEmail, createdAt: nowIso() });
-  addAuditLog(db, request, "oauth.google_connected", { installationId: installation.installationId, accountEmail: credential.accountEmail }, null);
-  await writeDb(db);
+    if (!existing) db.oauthCredentials.push(credential);
+    currentState.status = "completed";
+    currentState.completedAt = nowIso();
+    db.oauthEvents.push({ id: randomUUID(), type: "google_connected", installationId: installation.installationId, accountEmail: credential.accountEmail, createdAt: nowIso() });
+    addAuditLog(db, request, "oauth.google_connected", { installationId: installation.installationId, accountEmail: credential.accountEmail }, null);
+    await writeDb(db);
+  });
 
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>0auth concluido</title><body style="font-family:Arial;padding:32px"><h1>Google Drive conectado</h1><p>Conta autorizada para backups do TronSoftOS.</p><p>Voce ja pode fechar esta janela.</p></body></html>`);
 }
 
 async function handleOAuthAccessToken(request, response) {
-  const db = await readDb();
-  const installation = findInstallationByToken(db, request);
-  const credential = latestOAuthCredential(db, installation);
+  const snapshot = await readDb();
+  const installation = findInstallationByToken(snapshot, request);
+  let credential = latestOAuthCredential(snapshot, installation);
   if (!credential) {
     throw httpError(404, "Google Drive ainda nao conectado para esta instalacao.");
   }
 
   if (new Date(credential.expiresAt).getTime() < Date.now() + 60 * 1000) {
     const refreshed = await refreshGoogleToken(credential, request);
-    credential.accessToken = refreshed.access_token;
-    credential.expiresAt = new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString();
-    credential.scopes = String(refreshed.scope || credential.scopes.join(" ")).split(/\s+/).filter(Boolean);
-    credential.updatedAt = nowIso();
-    await writeDb(db);
+    credential = await runDbMutation("oauth-google-token-refresh", async () => {
+      const db = await readDb();
+      const currentInstallation = findInstallationByToken(db, request);
+      const currentCredential = latestOAuthCredential(db, currentInstallation);
+      if (!currentCredential) throw httpError(404, "Google Drive ainda nao conectado para esta instalacao.");
+      currentCredential.accessToken = refreshed.access_token;
+      currentCredential.expiresAt = new Date(Date.now() + Number(refreshed.expires_in || 3600) * 1000).toISOString();
+      currentCredential.scopes = String(refreshed.scope || currentCredential.scopes.join(" ")).split(/\s+/).filter(Boolean);
+      currentCredential.updatedAt = nowIso();
+      await writeDb(db);
+      return { ...currentCredential };
+    });
   }
 
   const token = {
@@ -3018,7 +3037,13 @@ const server = createServer(async (request, response) => {
 
   try {
     if (url.pathname === "/health" || url.pathname.startsWith("/api/")) {
-      await handleApi(request, response, url.pathname);
+      const selfManagedMutation = request.method === "POST" && url.pathname === "/api/tronsoftos/oauth/google/token";
+      const mutatesState = !selfManagedMutation && !["GET", "HEAD", "OPTIONS"].includes(request.method || "GET");
+      if (mutatesState) {
+        await runDbMutation(`${request.method || "UNKNOWN"} ${url.pathname}`, () => handleApi(request, response, url.pathname));
+      } else {
+        await handleApi(request, response, url.pathname);
+      }
       return;
     }
 
