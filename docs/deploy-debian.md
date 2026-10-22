@@ -14,12 +14,24 @@ Importante: no Debian, o instalador configura PostgreSQL por padrao. O JSON nao 
 ## Requisitos
 
 - Debian com acesso SSH.
-- Node.js 20 ou superior.
+- Node.js 22.23.4, 24.22.1 ou 26.12.1, ou patch posterior da mesma linha suportada.
 - PostgreSQL local ou `DATABASE_URL` de um PostgreSQL existente.
 - Usuario Linux dedicado para rodar a aplicacao.
 - Porta liberada no firewall, ou Nginx fazendo proxy.
 
 ## Instalacao automatica
+
+Desde a versao 0.1.11, o instalador verifica o patch de seguranca do Node,
+nao apenas a versao principal. Quando necessario, instala o binario oficial
+22.23.4 em `/opt` com SHA256 fixado e configura o systemd com o runtime ativo.
+Nao e necessario reinstalar o banco nem limpar dados.
+
+Em instalacoes existentes, a atualizacao pelo painel depende do comando
+`/usr/local/sbin/central-tronsoftos-update` configurado no servidor. Esse comando
+deve executar `install.sh` depois de atualizar os arquivos para aplicar tambem
+a correcao do runtime. Se ele apenas copia codigo ou executa `npm install`,
+e necessario executar o instalador como administrador, preservando os parametros
+do ambiente. Atualizar somente dependencias npm nao corrige o executavel Node.
 
 No servidor Debian 13:
 

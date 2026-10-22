@@ -2757,7 +2757,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname === "/health") {
-    sendJson(response, 200, { ok: true, service: "central-tronsoftos", storage: storageInfo(), checkedAt: nowIso() });
+    sendJson(response, 200, { ok: true, service: "central-tronsoftos", runtime: { node: process.version }, storage: storageInfo(), checkedAt: nowIso() });
     return;
   }
 

@@ -22,8 +22,9 @@ DATABASE_URL="${CENTRAL_TRONSOFTOS_DATABASE_URL:-}"
 ADMIN_EMAIL="${CENTRAL_TRONSOFTOS_ADMIN_EMAIL:-suporte@tronsoft.com.br}"
 ADMIN_PASSWORD="${CENTRAL_TRONSOFTOS_ADMIN_PASSWORD:-}"
 INSTALL_NODE="${CENTRAL_TRONSOFTOS_INSTALL_NODE:-ask}"
-NODE_MAJOR="${CENTRAL_TRONSOFTOS_NODE_MAJOR:-22}"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SOURCE_DIR/scripts/ensure-node-runtime.sh"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 NODE_BIN=""
 
 log() {
@@ -98,40 +99,39 @@ node_major_version() {
   node --version | sed -E 's/^v([0-9]+).*/\1/'
 }
 
-install_node_from_nodesource() {
-  log "Instalando Node.js ${NODE_MAJOR}.x via NodeSource"
-  as_root apt-get update
-  as_root apt-get install -y ca-certificates curl gnupg
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | as_root bash -
-  as_root apt-get install -y nodejs
+install_secure_node() {
+  log "Instalando Node.js corrigido com checksum oficial"
+  if ! command -v curl >/dev/null || ! command -v xz >/dev/null; then
+    as_root apt-get update
+    as_root apt-get install -y ca-certificates curl xz-utils
+  fi
+  as_root bash "$SOURCE_DIR/scripts/ensure-node-runtime.sh"
+  hash -r
 }
 
 ensure_node() {
-  local major
-  major="$(node_major_version)"
-  if [[ "$major" -ge 20 ]]; then
+  if node_runtime_supported "$(node --version 2>/dev/null || true)"; then
     log "Node.js encontrado: $(node --version)"
     return
   fi
 
   case "$INSTALL_NODE" in
     yes|sim|s|true|1)
-      install_node_from_nodesource
+      install_secure_node
       ;;
     no|nao|n|false|0)
-      fail "Node.js 20+ e obrigatorio. Instale Node.js e rode novamente."
+      fail "Node.js sem as correcoes de seguranca. Atualize o runtime antes de instalar."
       ;;
     *)
-      if ask_yes_no "Node.js 20+ nao foi encontrado. Instalar Node.js ${NODE_MAJOR}.x agora?" "s"; then
-        install_node_from_nodesource
+      if ask_yes_no "Node.js ausente ou vulneravel. Instalar Node.js 22.23.4 agora?" "s"; then
+        install_secure_node
       else
-        fail "Instalacao interrompida: Node.js 20+ e obrigatorio."
+        fail "Instalacao interrompida: Node.js corrigido e obrigatorio."
       fi
       ;;
   esac
 
-  major="$(node_major_version)"
-  [[ "$major" -ge 20 ]] || fail "Node.js instalado, mas a versao ainda e menor que 20."
+  node_runtime_supported "$(node --version)" || fail "Runtime instalado nao atende ao minimo de seguranca."
 }
 
 ensure_curl() {
