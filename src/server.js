@@ -6,6 +6,7 @@ import { basename, extname, join, normalize, resolve } from "node:path";
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dbMutationActive, readDb, runDbMutation, storageInfo, writeDb } from "./storage.js";
+import { assertClientCanBeDeleted, rebindInstallation, resetTarget } from "./installation-policy.js";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const prototypeDir = join(rootDir, "prototype");
@@ -2206,13 +2207,17 @@ async function handleSetClientStatus(request, response, clientId) {
 }
 
 async function handleResetClientToken(request, response, clientId) {
+  const payload = await readJson(request);
   const db = await readDbWithBootstrap();
   const user = requireUser(db, request);
   requirePermission(user, permissions.generateTokens, "Sem permissao para gerar tokens.");
   const client = requireClientAccess(db, user, clientId);
+  const replacementInstallationId = resetTarget(db, client.id, payload.installationId);
   const now = nowIso();
   db.pairingTokens
-    .filter((token) => token.clientId === client.id && token.status === "active")
+    .filter((token) => token.clientId === client.id && token.status === "active"
+      && (!replacementInstallationId || token.installationId === replacementInstallationId
+        || token.replacementInstallationId === replacementInstallationId || !token.installationId))
     .forEach((token) => {
       token.status = "revoked";
       token.revokedAt = token.revokedAt || now;
@@ -2227,6 +2232,7 @@ async function handleResetClientToken(request, response, clientId) {
     revokedAt: null,
     installationId: null
   };
+  token.replacementInstallationId = replacementInstallationId;
   db.pairingTokens.push(token);
   client.status = "active";
   client.updatedAt = now;
@@ -2243,6 +2249,7 @@ async function handleDeleteClient(request, response, clientId) {
   const user = requireUser(db, request);
   requireTronsoft(user);
   const client = requireClientAccess(db, user, clientId);
+  assertClientCanBeDeleted(db, client.id);
   const installationIds = new Set(db.installations
     .filter((installation) => installation.clientId === client.id)
     .map((installation) => installation.installationId));
@@ -2642,6 +2649,15 @@ async function handlePairTronsoftos(request, response) {
     throw httpError(403, "Cliente inativo na Central.");
   }
 
+  if (token.installationId && token.installationId !== payload.installationId?.trim()) {
+    throw httpError(409, "Token ja utilizado em outro ambiente. Resete o token do ambiente correto.");
+  }
+  if (token.replacementInstallationId && !token.usedAt) {
+    const previousInstallationId = token.replacementInstallationId;
+    rebindInstallation(db, client.id, token.replacementInstallationId, payload.installationId, randomUUID());
+    token.replacementInstallationId = payload.installationId.trim();
+    addAuditLog(db, request, "installation.rebind", { clientId: client.id, previousInstallationId, installationId: token.replacementInstallationId }, null);
+  }
   const installation = upsertInstallationForClient(db, client, payload);
   token.usedAt = token.usedAt || nowIso();
   token.installationId = installation.installationId;

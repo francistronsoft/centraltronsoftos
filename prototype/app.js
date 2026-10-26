@@ -1653,6 +1653,7 @@ function openClientEditModal(client) {
   }
   if (deleteButton) {
     deleteButton.hidden = currentUser?.role !== "tronsoft_admin";
+    deleteButton.textContent = form.elements.installationId.value ? "Excluir somente este ambiente" : "Excluir cliente sem ambientes";
   }
   if (saveButton) {
     saveButton.hidden = !can(permissions.manageClients);
@@ -1734,10 +1735,10 @@ async function runClientModalAction(action) {
         body: JSON.stringify({ status: nextStatus })
       });
     } else if (action === "token") {
-      if (!confirm("Gerar novo token e revogar tokens ativos anteriores deste cliente?")) return;
+      if (!confirm("Gerar novo token para este ambiente? Ao parear outra maquina, ela substituira este vinculo, preservando o historico.")) return;
       const payload = await api(`/api/clients/${encodeURIComponent(clientId)}/token`, {
         method: "POST",
-        body: "{}"
+        body: JSON.stringify({ installationId: installationId || undefined })
       });
       alert(`Novo token gerado: ${payload.pairingToken?.token || ""}`);
     } else if (action === "unpair") {
@@ -1752,10 +1753,13 @@ async function runClientModalAction(action) {
       });
     } else if (action === "delete") {
       const client = currentEditingClient();
-      if (!confirm(`Excluir permanentemente ${client?.name || "este cliente"} da Central? Esta acao remove ambientes, tokens, alertas e eventos vinculados.`)) return;
-      await api(`/api/clients/${encodeURIComponent(clientId)}`, {
-        method: "DELETE"
-      });
+      if (installationId) {
+        if (!confirm(`Excluir somente este ambiente de ${client?.name || "este cliente"}? Os outros ambientes e o cadastro do cliente serao preservados.`)) return;
+        await api(`/api/installations/${encodeURIComponent(installationId)}/unpair`, { method: "POST", body: "{}" });
+      } else {
+        if (!confirm(`Excluir o cadastro de ${client?.name || "este cliente"}? So e permitido quando nao houver ambientes vinculados.`)) return;
+        await api(`/api/clients/${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      }
     }
     closeClientEditModal();
     await loadCentralData();
