@@ -9,8 +9,8 @@ export function downloadMetadata(input) {
   const filename = String(input.filename || "");
   const title = String(input.title || "").trim();
   const version = String(input.version || "").trim();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,149}\.(exe|msi|zip)$/i.test(filename)) {
-    throw fail(400, "Use um arquivo .exe, .msi ou .zip com nome simples, sem diretorios.");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,149}\.(exe|msi|zip|rar)$/i.test(filename)) {
+    throw fail(400, "Use um arquivo .exe, .msi, .zip ou .rar com nome simples, sem diretorios.");
   }
   if (!title || title.length > 120 || !version || version.length > 40) {
     throw fail(400, "Informe nome (ate 120 caracteres) e versao (ate 40 caracteres).");

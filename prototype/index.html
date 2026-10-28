@@ -6,7 +6,7 @@
     <title>Central TronSystem</title>
     <link rel="icon" href="favicon.svg?v=central-c" type="image/svg+xml">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="styles.css?v=0.1.13">
+    <link rel="stylesheet" href="styles.css?v=0.1.14">
   </head>
   <body>
     <main id="login-view" class="login-view">
@@ -382,7 +382,7 @@
             <form id="download-upload-form" class="download-upload" hidden>
               <label>Nome <input name="title" value="Agente Windows" maxlength="120" required></label>
               <label>Versão <input name="version" maxlength="40" placeholder="Ex.: 0.1.7" required></label>
-              <label>Arquivo (.exe, .msi ou .zip, até 90 MiB) <input name="file" type="file" accept=".exe,.msi,.zip" required></label>
+              <label>Arquivo (.exe, .msi, .zip ou .rar, até 90 MiB) <input name="file" type="file" accept=".exe,.msi,.zip,.rar" required></label>
               <button type="submit" class="primary-button">Publicar arquivo</button>
             </form>
             <p id="downloads-message" role="status"></p>
@@ -471,6 +471,6 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="firebird-session-view.js?v=20260930-session-equipment"></script>
-    <script src="app.js?v=0.1.13"></script>
+    <script src="app.js?v=0.1.14"></script>
   </body>
 </html>

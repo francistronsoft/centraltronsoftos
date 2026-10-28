@@ -48,7 +48,7 @@ test("HTTP: autenticacao, publicacao admin, download e exclusao sem afetar cadas
     });
     const adminHeaders = { cookie: `central_session=${adminToken}`, "content-type": "application/octet-stream" };
     const userHeaders = { cookie: `central_session=${userToken}` };
-    const query = new URLSearchParams({ filename: "Agent.exe", title: "Windows", version: "1" });
+    const query = new URLSearchParams({ filename: "Agent.RAR", title: "Windows", version: "1" });
     const endpoint = `${base}/api/downloads?${query}`;
     assert.equal((await fetch(endpoint, { method: "POST", headers: userHeaders, body: "binary" })).status, 403);
     const before = JSON.parse(await readFile(join(dataDir, "central-db.json"), "utf8"));

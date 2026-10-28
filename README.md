@@ -166,7 +166,7 @@ Abra `prototype/index.html` no navegador para visualizar o rascunho estatico, ou
 
 O menu Downloads permite baixar arquivos com uma sessao autenticada na Central.
 Somente administradores TronSoft podem publicar ou excluir arquivos .exe, .msi
-e .zip (ate 90 MiB por arquivo). Informe nome e versao e envie o instalador,
+e arquivos .zip e .rar (ate 90 MiB por arquivo). Informe nome e versao e envie o instalador,
 por exemplo TronSoftAgentWindowsSetup.exe. A Central exibe tamanho e SHA-256.
 Os arquivos nao sao executados nem extraidos pelo servidor.
 
