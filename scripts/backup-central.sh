@@ -161,6 +161,12 @@ else
   log "Nenhum DATABASE_URL ou central-db.json encontrado; backup tera apenas configuracoes."
 fi
 
+downloads_dir="${CENTRAL_DATA_DIR:-$APP_DIR/data}/downloads"
+if [[ -d "$downloads_dir" ]]; then
+  log "Copiando arquivos da area de downloads"
+  cp -a "$downloads_dir" "$work_dir/downloads"
+fi
+
 tar -C "$BACKUP_DIR/.work" -czf "$archive" "central-$timestamp"
 chmod 600 "$archive"
 if id "$APP_USER" >/dev/null 2>&1; then

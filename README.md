@@ -162,3 +162,16 @@ src/
 ## Prototipo
 
 Abra `prototype/index.html` no navegador para visualizar o rascunho estatico, ou rode `npm run dev` para abrir a Central consumindo a API local.
+## Downloads de instaladores
+
+O menu Downloads permite baixar arquivos com uma sessao autenticada na Central.
+Somente administradores TronSoft podem publicar ou excluir arquivos .exe, .msi
+e .zip (ate 90 MiB por arquivo). Informe nome e versao e envie o instalador,
+por exemplo TronSoftAgentWindowsSetup.exe. A Central exibe tamanho e SHA-256.
+Os arquivos nao sao executados nem extraidos pelo servidor.
+
+Publicacoes ficam em `${CENTRAL_DATA_DIR:-data}/downloads`, fora do Git e
+incluidas nos scripts de backup/restauracao da Central. Cada envio cria uma
+publicacao independente; atualizacoes do sistema preservam os arquivos.
+O limite de upload de um proxy reverso tambem precisa permitir o tamanho
+do instalador; arquivos acima de 90 MiB nao sao aceitos nesta area.

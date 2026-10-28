@@ -72,6 +72,7 @@ const viewTitles = {
   alerts: "Alertas",
   oauth: "0auth",
   account: "Minha conta",
+  downloads: "Downloads",
   "client-detail": "Detalhes do cliente",
   maintenance: "Manutencao"
 };
@@ -420,6 +421,7 @@ function showView(view) {
     users: can(permissions.manageUsers),
     maintenance: can(permissions.maintenance),
     account: true,
+    downloads: true,
     "client-detail": can(permissions.viewMonitor)
   };
   activeView = allowedViews[view] ? view : (can(permissions.viewMonitor) ? "dashboard" : "account");
@@ -443,6 +445,79 @@ async function ensureActiveViewData() {
   if (activeView === "oauth" && can(permissions.manageOAuth)) await loadOAuthSummaryIfNeeded();
   if (activeView === "environments") renderEnvironments();
   if (activeView === "maintenance") await loadBackupStatus();
+  if (activeView === "downloads") await loadDownloads();
+}
+
+async function loadDownloads() {
+  const message = document.querySelector("#downloads-message");
+  const list = document.querySelector("#downloads-list");
+  const admin = currentUser?.role === "tronsoft_admin";
+  document.querySelector("#download-upload-form").hidden = !admin;
+  try {
+    const items = await api("/api/downloads");
+    list.replaceChildren();
+    if (!items.length) list.textContent = "Nenhum arquivo publicado. O administrador pode enviar o instalador do agente Windows aqui.";
+    for (const item of items) {
+      const card = document.createElement("article");
+      card.className = "download-card";
+      const heading = document.createElement("h3");
+      heading.textContent = `${item.title} · ${item.version}`;
+      const description = document.createElement("p");
+      description.textContent = `${item.filename} · ${(item.size / 1024 / 1024).toFixed(1)} MiB · ${new Date(item.createdAt).toLocaleString("pt-BR")}`;
+      const checksum = document.createElement("p");
+      checksum.className = "download-checksum";
+      checksum.textContent = `SHA-256: ${item.sha256}`;
+      const link = document.createElement("a");
+      link.className = "secondary-button";
+      link.href = `/api/downloads/${encodeURIComponent(item.id)}`;
+      link.textContent = "Baixar arquivo";
+      card.append(heading, description, checksum, link);
+      if (admin) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "secondary-button";
+        remove.textContent = "Excluir arquivo";
+        remove.addEventListener("click", async () => {
+          if (!window.confirm(`Excluir somente o download ${item.filename}?`)) return;
+          remove.disabled = true;
+          try {
+            await api(`/api/downloads/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+            message.textContent = "Arquivo excluído.";
+            await loadDownloads();
+          } catch (error) { message.textContent = error.message; remove.disabled = false; }
+        });
+        card.append(remove);
+      }
+      list.append(card);
+    }
+  } catch (error) { message.textContent = error.message; }
+}
+
+async function publishDownload(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button");
+  const message = document.querySelector("#downloads-message");
+  const file = form.elements.file.files[0];
+  if (!file || file.size === 0 || file.size > 90 * 1024 * 1024) {
+    message.textContent = "Selecione um arquivo não vazio de até 90 MiB."; return;
+  }
+  button.disabled = true;
+  message.textContent = "Enviando arquivo. Aguarde a confirmação antes de sair desta tela.";
+  try {
+    const query = new URLSearchParams({ title: form.elements.title.value, version: form.elements.version.value, filename: file.name });
+    const response = await fetch(`/api/downloads?${query}`, {
+      method: "POST", headers: { "content-type": "application/octet-stream" }, body: file
+    });
+    const result = await response.json().catch(() => ({ error: response.status === 413
+      ? "O proxy recusou o tamanho do arquivo. Confira o limite de upload do Nginx/Cloudflare."
+      : "O servidor não confirmou o envio. Verifique a conexão antes de tentar novamente." }));
+    if (!response.ok) throw new Error(result.error || "Falha ao publicar arquivo.");
+    form.elements.file.value = "";
+    message.textContent = "Arquivo publicado.";
+    await loadDownloads();
+  } catch (error) { message.textContent = error.message; }
+  finally { button.disabled = false; }
 }
 
 async function loadSession() {
@@ -4631,6 +4706,7 @@ async function createReseller(event) {
 }
 
 document.querySelector("#login-form").addEventListener("submit", login);
+document.querySelector("#download-upload-form").addEventListener("submit", publishDownload);
 document.querySelector("#logout-button").addEventListener("click", logout);
 document.querySelector("#refresh-button").addEventListener("click", refreshCentralDataSoon);
 document.querySelector("#theme-toggle-button").addEventListener("click", toggleTheme);

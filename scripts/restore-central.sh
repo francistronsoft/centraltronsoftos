@@ -53,6 +53,17 @@ elif [[ -f "$backup_root/db/central-db.json" ]]; then
   install -m 640 "$backup_root/db/central-db.json" "$APP_DIR/data/central-db.json"
 fi
 
+if [[ -d "$backup_root/downloads" ]]; then
+  log "Restaurando arquivos da area de downloads"
+  downloads_dir="${CENTRAL_DATA_DIR:-$APP_DIR/data}/downloads"
+  install -d -m 700 "$downloads_dir"
+  cp -a "$backup_root/downloads/." "$downloads_dir/"
+  app_user="${CENTRAL_TRONSOFTOS_USER:-central-tronsoftos}"
+  if id "$app_user" >/dev/null 2>&1; then
+    chown -R "$app_user:$app_user" "$downloads_dir"
+  fi
+fi
+
 if [[ -f "$backup_root/config/cloudflared.tar.gz" ]]; then
   log "Restaurando /etc/cloudflared"
   tar -C /etc -xzf "$backup_root/config/cloudflared.tar.gz"

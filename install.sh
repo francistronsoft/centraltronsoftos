@@ -261,6 +261,7 @@ copy_app() {
         --exclude='./.agents' \
         --exclude='./data/*.json' \
         --exclude='data/*.json' \
+        --exclude='./data/downloads' \
         --exclude='./node_modules' \
         --exclude='./dist' \
         --exclude='./build' \
@@ -364,6 +365,7 @@ setup_nginx() {
 server {
     listen 80;
     server_name $DOMAIN;
+    client_max_body_size 96m;
 
     location / {
         proxy_pass http://127.0.0.1:$PORT;

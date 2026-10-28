@@ -283,6 +283,7 @@ server {
     listen 80;
     server_name central.seudominio.com.br;
 
+    client_max_body_size 96m;
     location / {
         proxy_pass http://127.0.0.1:3080;
         proxy_http_version 1.1;

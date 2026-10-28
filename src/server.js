@@ -7,9 +7,11 @@ import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { fileURLToPath } from "node:url";
 import { dbMutationActive, readDb, runDbMutation, storageInfo, writeDb } from "./storage.js";
 import { assertClientCanBeDeleted, rebindInstallation, resetTarget } from "./installation-policy.js";
+import { downloadStore } from "./downloads.js";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const prototypeDir = join(rootDir, "prototype");
+const downloads = downloadStore(join(resolve(process.env.CENTRAL_DATA_DIR || join(rootDir, "data")), "downloads"));
 const port = Number(process.env.PORT || 3080);
 const sessionCookie = "central_session";
 const sessionMaxAgeSeconds = 12 * 60 * 60;
@@ -2899,6 +2901,40 @@ async function handleApi(request, response, pathname) {
     ? url.searchParams.get("resellerId") || ""
     : "";
 
+  if (pathname === "/api/downloads" && request.method === "GET") {
+    sendJson(response, 200, await downloads.list());
+    return;
+  }
+  if (pathname === "/api/downloads" && request.method === "POST") {
+    requireTronsoft(user);
+    if (request.headers["content-type"] !== "application/octet-stream") throw httpError(415, "Envie o arquivo como application/octet-stream.");
+    const item = await downloads.publish(request, Object.fromEntries(url.searchParams));
+    sendJson(response, 201, item);
+    return;
+  }
+  const downloadMatch = pathname.match(/^\/api\/downloads\/([^/]+)$/);
+  if (downloadMatch && request.method === "DELETE") {
+    requireTronsoft(user);
+    await downloads.remove(downloadMatch[1]);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+  if (downloadMatch && request.method === "GET") {
+    const { metadata, path, size } = await downloads.get(downloadMatch[1]);
+    const stream = createReadStream(path);
+    stream.on("error", () => response.destroy());
+    response.on("close", () => stream.destroy());
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": size,
+      "content-disposition": `attachment; filename="${metadata.filename}"`,
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, no-store"
+    });
+    stream.pipe(response);
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/dashboard") {
     const visibleClients = scopedClients(db, user, resellerId);
     const installations = scopedInstallations(db, user, resellerId);
@@ -3053,7 +3089,8 @@ const server = createServer(async (request, response) => {
 
   try {
     if (url.pathname === "/health" || url.pathname.startsWith("/api/")) {
-      const selfManagedMutation = request.method === "POST" && url.pathname === "/api/tronsoftos/oauth/google/token";
+      const selfManagedMutation = (request.method === "POST" && url.pathname === "/api/tronsoftos/oauth/google/token")
+        || url.pathname === "/api/downloads" || url.pathname.startsWith("/api/downloads/");
       const mutatesState = !selfManagedMutation && !["GET", "HEAD", "OPTIONS"].includes(request.method || "GET");
       if (mutatesState) {
         await runDbMutation(`${request.method || "UNKNOWN"} ${url.pathname}`, () => handleApi(request, response, url.pathname));
@@ -3076,5 +3113,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  console.log(`Central TronSoftOS rodando em http://localhost:${port}`);
+  console.log(`Central TronSoftOS rodando em http://localhost:${server.address().port}`);
 });
