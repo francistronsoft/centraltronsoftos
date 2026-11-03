@@ -3400,6 +3400,18 @@ function renderHaNodeOperationalCards(nodeClient, options = {}) {
     </section>
 
     <section class="ops-grid">
+      <article class="ops-panel ops-panel-wide transaction-health-panel">
+        <div class="ops-panel-head">
+          <div>
+            <h3>Transacoes Firebird</h3>
+            <span>OIT, OAT, Next, gap e sweep por banco</span>
+          </div>
+        </div>
+        ${renderDatabaseTransactionHealth(database)}
+      </article>
+    </section>
+
+    <section class="ops-grid">
       <article class="ops-panel ops-panel-wide firebird-sessions-panel">
         <div class="ops-panel-head">
           <div>
