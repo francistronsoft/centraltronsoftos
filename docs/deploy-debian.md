@@ -26,12 +26,27 @@ nao apenas a versao principal. Quando necessario, instala o binario oficial
 22.23.4 em `/opt` com SHA256 fixado e configura o systemd com o runtime ativo.
 Nao e necessario reinstalar o banco nem limpar dados.
 
-Em instalacoes existentes, a atualizacao pelo painel depende do comando
-`/usr/local/sbin/central-tronsoftos-update` configurado no servidor. Esse comando
-deve executar `install.sh` depois de atualizar os arquivos para aplicar tambem
-a correcao do runtime. Se ele apenas copia codigo ou executa `npm install`,
-e necessario executar o instalador como administrador, preservando os parametros
-do ambiente. Atualizar somente dependencias npm nao corrige o executavel Node.
+Desde a versao 0.1.16, o instalador tambem publica o atualizador versionado
+`scripts/update-central.sh` em `/usr/local/sbin/central-tronsoftos-update`.
+Ele verifica o runtime antes de aplicar os arquivos, preserva o codigo anterior
+e configura um drop-in do systemd com o caminho absoluto do Node corrigido.
+O reinicio e agendado por uma unidade separada, preservando a resposta HTTP
+do botao. Usuario, ambiente, dados, rede e configuracoes adicionais do servico
+nao sao recriados. Atualizar somente dependencias npm nao corrige o executavel Node.
+
+Para substituir um atualizador antigo sem executar novamente o wizard:
+
+```bash
+sudo install -o root -g central-tronsoftos -m 0750 scripts/update-central.sh /usr/local/sbin/central-tronsoftos-update
+```
+
+O script espera o checkout em `/root/centraltronsoftos` por padrao; configuracoes
+personalizadas continuam disponiveis pelas variaveis `CENTRAL_TRONSOFTOS_*`.
+Confirmar essas variaveis antes de substituir um atualizador personalizado.
+A primeira aplicacao em uma instalacao antiga deve ser feita como manutencao
+administrativa com backup. O Nginx do host recebe correcoes pelo gerenciador de
+pacotes Debian; atualizar o codigo da Central nao atualiza automaticamente esse
+pacote nem os demais componentes do sistema operacional.
 
 No servidor Debian 13:
 

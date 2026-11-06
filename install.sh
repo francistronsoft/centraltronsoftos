@@ -343,6 +343,8 @@ EOF
 }
 
 install_backup_service() {
+  log "Instalando atualizador da Central com verificacao de runtime"
+  as_root install -o root -g "$APP_GROUP" -m 0750 "$SOURCE_DIR/scripts/update-central.sh" /usr/local/sbin/central-tronsoftos-update
   if [[ -f "$APP_DIR/scripts/install-backup-service.sh" ]]; then
     log "Configurando backup automatico da Central"
     as_root env \
